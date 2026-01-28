@@ -22,6 +22,28 @@ export async function GET(req: Request) {
 
   const tokenData = await tokenRes.json();
 
-  // For now, just return it (we'll improve this later)
-  return NextResponse.json(tokenData);
+  const html = `
+<!DOCTYPE html>
+<html>
+  <body>
+    <script>
+      if (window.opener) {
+        window.opener.postMessage(
+          {
+            type: "GOOGLE_OAUTH_SUCCESS",
+            accessToken: "${tokenData.access_token}",
+            expiresIn: ${tokenData.expires_in}
+          },
+          window.location.origin
+        );
+        window.close();
+      }
+    </script>
+  </body>
+</html>
+`;
+
+  return new NextResponse(html, {
+    headers: { "Content-Type": "text/html" },
+  });
 }
