@@ -2,6 +2,10 @@
 
 import { useEffect, useState } from "react";
 
+/* =======================
+   Types
+======================= */
+
 type PhotoMetadata = {
   apertureFNumber?: number;
   exposureTime?: string;
@@ -37,45 +41,168 @@ type MediaItem = {
   mediaFile: MediaFile;
 };
 
-function VideoPlayer({ video, accessToken }: { video: MediaItem; accessToken: string }) {
+/* =======================
+   Helpers
+======================= */
+
+function groupVideosByDay(videos: MediaItem[]) {
+  const map: Record<string, MediaItem[]> = {};
+
+  for (const video of videos) {
+    const dayKey = new Date(video.createTime)
+      .toISOString()
+      .slice(0, 10); // YYYY-MM-DD
+
+    if (!map[dayKey]) map[dayKey] = [];
+    map[dayKey].push(video);
+  }
+
+  Object.values(map).forEach((list) =>
+    list.sort(
+      (a, b) =>
+        new Date(a.createTime).getTime() -
+        new Date(b.createTime).getTime()
+    )
+  );
+
+  return map;
+}
+
+/* =======================
+   Video Player
+======================= */
+
+function VideoPlayer({
+  video,
+  accessToken,
+}: {
+  video: MediaItem;
+  accessToken: string;
+}) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let revoked = false;
+    let currentUrl: string | null = null;
 
     async function fetchVideo() {
-      const proxyUrl = `/api/photos/proxy?url=${encodeURIComponent(video.mediaFile.baseUrl + "=dv")}`;
+      const proxyUrl = `/api/photos/proxy?url=${encodeURIComponent(
+        video.mediaFile.baseUrl + "=dv"
+      )}`;
+
       const res = await fetch(proxyUrl, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
 
-      if (res.ok && !revoked) {
-        const blob = await res.blob();
-        setBlobUrl(URL.createObjectURL(blob));
-      }
+      if (!res.ok) return;
+
+      const blob = await res.blob();
+      if (revoked) return;
+
+      currentUrl = URL.createObjectURL(blob);
+      setBlobUrl(currentUrl);
     }
 
     fetchVideo();
 
     return () => {
       revoked = true;
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      if (currentUrl) URL.revokeObjectURL(currentUrl);
     };
-  }, [video, accessToken]);
+  }, [video.id, accessToken]);
 
-  if (!blobUrl) return <p>Loading video...</p>;
+  if (!blobUrl) {
+    return <p style={{ fontSize: 12 }}>Loading video…</p>;
+  }
 
-  return <video src={blobUrl} controls width={300} />;
+  return (
+    <video
+      src={blobUrl}
+      controls
+      style={{ width: "100%", borderRadius: 6 }}
+    />
+  );
 }
+
+/* =======================
+   Day Card (Accordion)
+======================= */
+
+function DayCard({
+  date,
+  videos,
+  accessToken,
+}: {
+  date: string;
+  videos: MediaItem[];
+  accessToken: string;
+}) {
+  const [selected, setSelected] = useState<MediaItem>(videos[0]);
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div
+      style={{
+        border: "1px solid #ddd",
+        borderRadius: 10,
+        padding: 12,
+        background: "#fff",
+      }}
+    >
+      <h3 style={{ marginBottom: 8 }}>
+        {new Date(date).toDateString()}
+      </h3>
+
+      <VideoPlayer video={selected} accessToken={accessToken} />
+
+      {videos.length > 1 && (
+        <div style={{ marginTop: 8 }}>
+          <button
+            onClick={() => setOpen(!open)}
+            style={{ fontSize: 12 }}
+          >
+            {open
+              ? "Hide other videos"
+              : `Choose another (${videos.length})`}
+          </button>
+
+          {open && (
+            <div style={{ marginTop: 6 }}>
+              {videos.map((v) => (
+                <button
+                  key={v.id}
+                  onClick={() => setSelected(v)}
+                  style={{
+                    display: "block",
+                    marginBottom: 4,
+                    fontSize: 12,
+                    fontWeight:
+                      v.id === selected.id ? "bold" : "normal",
+                  }}
+                >
+                  {new Date(v.createTime).toLocaleTimeString()}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* =======================
+   Home Page
+======================= */
 
 export default function Home() {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [videos, setVideos] = useState<MediaItem[]>([]);
 
-  // ---------------------------
-  // OAuth popup listener
-  // ---------------------------
+  /* -----------------------
+     OAuth listener
+  ----------------------- */
   useEffect(() => {
     const stored = sessionStorage.getItem("google_access_token");
     if (stored) setAccessToken(stored);
@@ -96,9 +223,9 @@ export default function Home() {
     return () => window.removeEventListener("message", handleMessage);
   }, []);
 
-  // ---------------------------
-  // Open Google Photos Picker
-  // ---------------------------
+  /* -----------------------
+     Picker
+  ----------------------- */
   async function openPicker() {
     if (!accessToken) return;
 
@@ -109,14 +236,14 @@ export default function Home() {
     });
 
     const { pickerUri, id } = await res.json();
+    setSessionId(id);
 
     window.open(pickerUri, "photos-picker", "width=600,height=700");
-    setSessionId(id);
   }
 
-  // ---------------------------
-  // Poll picker session (POST!)
-  // ---------------------------
+  /* -----------------------
+     Poll picker session
+  ----------------------- */
   useEffect(() => {
     if (!sessionId || !accessToken) return;
 
@@ -148,8 +275,6 @@ export default function Home() {
 
         const media = await mediaRes.json();
 
-        console.log("Media items:", media);
-
         const onlyVideos = media.mediaItems.filter(
           (item: MediaItem) => item.type === "VIDEO"
         );
@@ -161,9 +286,9 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [sessionId, accessToken]);
 
-  // ---------------------------
-  // Login
-  // ---------------------------
+  /* -----------------------
+     Login
+  ----------------------- */
   function loginWithGoogle() {
     window.open(
       "/api/oauth/login",
@@ -172,15 +297,20 @@ export default function Home() {
     );
   }
 
-  // ---------------------------
-  // UI
-  // ---------------------------
+  const videosByDay = groupVideosByDay(videos);
+  const days = Object.keys(videosByDay).sort();
+
+  /* -----------------------
+     UI
+  ----------------------- */
   return (
     <main style={{ padding: 24 }}>
       <h1>1 Second a Day</h1>
 
       {!accessToken ? (
-        <button onClick={loginWithGoogle}>Login with Google</button>
+        <button onClick={loginWithGoogle}>
+          Login with Google
+        </button>
       ) : (
         <>
           <p>✅ Logged in</p>
@@ -189,9 +319,22 @@ export default function Home() {
             Select videos from Google Photos
           </button>
 
-          <div style={{ marginTop: 24 }}>
-            {videos.map((video) => (
-              <VideoPlayer key={video.id} video={video} accessToken={accessToken} />
+          <div
+            style={{
+              marginTop: 24,
+              display: "grid",
+              gridTemplateColumns:
+                "repeat(auto-fill, minmax(340px, 1fr))",
+              gap: 16,
+            }}
+          >
+            {days.map((day) => (
+              <DayCard
+                key={day}
+                date={day}
+                videos={videosByDay[day]}
+                accessToken={accessToken}
+              />
             ))}
           </div>
         </>
