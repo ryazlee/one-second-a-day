@@ -1,66 +1,136 @@
+"use client";
+
+import { Button } from "@/src/components/Button";
 import { VideoPlayer } from "@/src/components/VideoPlayer";
-import { MediaItem } from "@/src/types/types";
-import { useState } from "react";
+import { formatDayLabel, formatSeconds } from "@/src/lib/dates";
+import {
+  DaySelection,
+  ExportOrientation,
+  MediaItem,
+} from "@/src/types/types";
+import { useMemo, useState } from "react";
 
 export function DayCard({
   date,
   videos,
   accessToken,
+  selection,
+  showDateStamp,
+  orientation,
+  onChange,
 }: {
   date: string;
   videos: MediaItem[];
   accessToken: string;
+  selection: DaySelection;
+  showDateStamp: boolean;
+  orientation: ExportOrientation;
+  onChange: (next: DaySelection) => void;
 }) {
-  const [selected, setSelected] = useState<MediaItem>(videos[0]);
-  const [open, setOpen] = useState(false);
+  const [openAlts, setOpenAlts] = useState(false);
+  const [duration, setDuration] = useState(1);
+
+  const selected = useMemo(
+    () => videos.find((v) => v.id === selection.mediaId) ?? videos[0],
+    [videos, selection.mediaId]
+  );
+
+  const maxStart = Math.max(0, duration - 1);
 
   return (
-    <div
-      style={{
-        border: "1px solid #ddd",
-        borderRadius: 10,
-        padding: 12,
-        background: "#fff",
-      }}
-    >
-      <h3 style={{ marginBottom: 8 }}>
-        {new Date(date).toDateString()}
-      </h3>
+    <article className="surface-card day-card">
+      <div className="day-card__top">
+        <div>
+          <h3 className="day-card__date">{formatDayLabel(date)}</h3>
+          <p className="day-card__meta">
+            {videos.length} clip{videos.length === 1 ? "" : "s"} · 1 second
+          </p>
+        </div>
+        <label className="toggle" title={selection.included ? "Included" : "Skipped"}>
+          <input
+            type="checkbox"
+            checked={selection.included}
+            onChange={(e) =>
+              onChange({ ...selection, included: e.target.checked })
+            }
+          />
+          <span />
+        </label>
+      </div>
 
-      <VideoPlayer video={selected} accessToken={accessToken} />
+      <VideoPlayer
+        video={selected}
+        accessToken={accessToken}
+        startSeconds={selection.startSeconds}
+        showDateStamp={showDateStamp}
+        dayKey={date}
+        orientation={orientation}
+        onDuration={setDuration}
+      />
 
-      {videos.length > 1 && (
-        <div style={{ marginTop: 8 }}>
-          <button
-            onClick={() => setOpen(!open)}
-            style={{ fontSize: 12 }}
-          >
-            {open
-              ? "Hide other videos"
-              : `Choose another (${videos.length})`}
-          </button>
+      <div className="trim-controls">
+        <label>
+          <span>1s start</span>
+          <span className="trim-readout">
+            {formatSeconds(selection.startSeconds)} –{" "}
+            {formatSeconds(selection.startSeconds + 1)}
+          </span>
+        </label>
+        <input
+          type="range"
+          min={0}
+          max={maxStart}
+          step={0.1}
+          value={Math.min(selection.startSeconds, maxStart)}
+          disabled={!selection.included || maxStart <= 0}
+          onChange={(e) =>
+            onChange({
+              ...selection,
+              startSeconds: Number(e.target.value),
+            })
+          }
+        />
+      </div>
 
-          {open && (
-            <div style={{ marginTop: 6 }}>
+      {videos.length > 1 ? (
+        <div>
+          <Button
+            label={
+              openAlts
+                ? "Hide other clips"
+                : `Choose another (${videos.length})`
+            }
+            variant="ghost"
+            size="sm"
+            onClick={() => setOpenAlts((v) => !v)}
+          />
+          {openAlts ? (
+            <div className="chip-row" style={{ marginTop: 6 }}>
               {videos.map((v) => (
                 <button
                   key={v.id}
-                  onClick={() => setSelected(v)}
-                  style={{
-                    display: "block",
-                    marginBottom: 4,
-                    fontSize: 12,
-                    fontWeight:
-                      v.id === selected.id ? "bold" : "normal",
-                  }}
+                  type="button"
+                  className={`chip ${
+                    v.id === selected.id ? "chip--active" : ""
+                  }`}
+                  onClick={() =>
+                    onChange({
+                      ...selection,
+                      mediaId: v.id,
+                      startSeconds: 0,
+                    })
+                  }
                 >
-                  {new Date(v.createTime).toLocaleTimeString()}
+                  {new Date(v.createTime).toLocaleTimeString([], {
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}
                 </button>
               ))}
             </div>
-          )}
+          ) : null}
         </div>
-      )}
-    </div>
+      ) : null}
+    </article>
   );
 }

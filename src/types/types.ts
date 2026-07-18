@@ -32,3 +32,12 @@ export type MediaItem = {
   type: "PHOTO" | "VIDEO";
   mediaFile: MediaFile;
 };
+
+export type DaySelection = {
+  dayKey: string;
+  mediaId: string;
+  startSeconds: number;
+  included: boolean;
+};
+
+export type ExportOrientation = "portrait" | "landscape";

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 interface PickerSession {
   sessionId: string | null;
@@ -24,15 +24,13 @@ export function usePhotosPicker(accessToken: string | null): PickerSession {
     const { pickerUri, id } = await res.json();
     setSessionId(id);
     setIsReady(false);
+    setIsPolling(true);
 
     window.open(pickerUri, "photos-picker", "width=600,height=700");
   }, [accessToken]);
 
-  // Poll picker session until media items are set
   useEffect(() => {
-    if (!sessionId || !accessToken) return;
-
-    setIsPolling(true);
+    if (!sessionId || !accessToken || !isPolling) return;
 
     const interval = setInterval(async () => {
       const res = await fetch(`/api/photos/picker/session/${sessionId}`, {
@@ -54,9 +52,8 @@ export function usePhotosPicker(accessToken: string | null): PickerSession {
 
     return () => {
       clearInterval(interval);
-      setIsPolling(false);
     };
-  }, [sessionId, accessToken]);
+  }, [sessionId, accessToken, isPolling]);
 
   return {
     sessionId,

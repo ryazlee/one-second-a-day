@@ -1,8 +1,9 @@
 import { Providers } from "./providers";
+import "./globals.css";
 
 export const metadata = {
   title: "1 Second a Day",
-  description: "Create a 1-second-a-day video from Google Photos",
+  description: "Make a watermark-free one-second-a-day video from Google Photos",
 };
 
 export default function RootLayout({
@@ -13,7 +14,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <Providers>{children}</Providers>
+        <Providers>
+          <div className="app-shell">{children}</div>
+        </Providers>
       </body>
     </html>
   );
