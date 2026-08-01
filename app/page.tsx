@@ -37,10 +37,6 @@ export default function Home() {
     }
   }
 
-  function signOut() {
-    setAccessToken(null);
-  }
-
   const { data: videos = [], isLoading: videosLoading } = useVideos(
     isReady ? accessToken : null,
     isReady ? sessionId : null
@@ -56,27 +52,16 @@ export default function Home() {
 
   return (
     <>
-      <header className="app-header">
-        <div className="app-header-inner">
-          <Link href="/" className="brand">
-            1 Second a Day
-          </Link>
-          {accessToken ? (
-            <Button label="Sign out" variant="ghost" onClick={signOut} />
-          ) : null}
-        </div>
-      </header>
-
       <main className={hasVideos ? "app-main app-main--with-action" : "app-main"}>
         <div className="shell-inner">
           {!accessToken ? (
             <Page>
               <section className="surface-card login-card">
                 <p className="section-label">Google Photos</p>
-                <h1>1 Second a Day</h1>
+                <h1>Sign in to continue</h1>
                 <p>
                   Pick videos from any month, choose one second per day, and
-                  export a clean compilation — no app, no watermark.
+                  export a clean compilation in your browser.
                 </p>
                 <Button label="Continue with Google" onClick={loginWithGoogle} />
                 {loginError ? (
@@ -97,7 +82,9 @@ export default function Home() {
                 title="Your days"
                 subtitle="Select clips from Google Photos, trim each day to one second, then export."
                 action={
-                  <span className="status-pill">Signed in</span>
+                  accessToken ? (
+                    <span className="status-pill">Signed in</span>
+                  ) : null
                 }
               />
 

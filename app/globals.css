@@ -4,15 +4,15 @@
   --text-muted: #9ca3af;
   --bg: #fafafa;
   --surface: #ffffff;
+  --inset: #f3f4f6;
   --border: #e5e7eb;
-  --border-light: #f3f4f6;
   --accent: #111827;
-  --success: #059669;
-  --success-bg: #ecfdf5;
+  --accent-contrast: #ffffff;
   --danger: #dc2626;
+  --success: #059669;
   --radius: 12px;
   --content-max: 720px;
-  --header-height: 52px;
+  --header-height: auto;
   --touch-min: 44px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -22,10 +22,26 @@
   line-height: 1.5;
   color: var(--text);
   background: var(--bg);
+  color-scheme: light;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
+}
+
+html.theme-dark {
+  color-scheme: dark;
+  --text: #f9fafb;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+  --bg: #111827;
+  --surface: #1f2937;
+  --inset: #374151;
+  --border: #374151;
+  --accent: #f3f4f6;
+  --accent-contrast: #111827;
+  --danger: #f87171;
+  --success: #34d399;
 }
 
 *,
@@ -68,7 +84,6 @@ a {
   position: sticky;
   top: 0;
   z-index: 20;
-  height: var(--header-height);
   display: flex;
   align-items: center;
   border-bottom: 1px solid var(--border);
@@ -79,7 +94,8 @@ a {
 
 .app-header-inner,
 .shell-inner,
-.sticky-action-inner {
+.sticky-action-inner,
+.site-footer-inner {
   width: 100%;
   max-width: var(--content-max);
   margin: 0 auto;
@@ -89,18 +105,59 @@ a {
 
 .app-header-inner {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.75rem;
+  padding-top: 0.85rem;
+  padding-bottom: 0.85rem;
+}
+
+.brand-block {
+  min-width: 0;
 }
 
 .brand {
   margin: 0;
-  font-size: 1rem;
-  font-weight: 650;
+  display: inline-block;
+  font-size: 1.125rem;
+  font-weight: 600;
   letter-spacing: -0.02em;
+  line-height: 1.25;
   text-decoration: none;
-  color: inherit;
+  color: var(--text);
+}
+
+.subtitle {
+  margin: 0.25rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.theme-toggle {
+  flex-shrink: 0;
+  width: var(--touch-min);
+  height: var(--touch-min);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.theme-toggle:hover {
+  border-color: color-mix(in srgb, var(--text-muted) 40%, var(--border));
 }
 
 .site-footer {
@@ -110,11 +167,6 @@ a {
 }
 
 .site-footer-inner {
-  width: 100%;
-  max-width: var(--content-max);
-  margin: 0 auto;
-  padding-left: 1rem;
-  padding-right: 1rem;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -171,8 +223,8 @@ a {
 
 .legal-doc h1 {
   margin: 0;
-  font-size: 1.75rem;
-  font-weight: 650;
+  font-size: 1.5rem;
+  font-weight: 600;
   letter-spacing: -0.03em;
 }
 
@@ -232,7 +284,7 @@ a {
 
 .page-header h1 {
   margin: 0;
-  font-size: 1.5rem;
+  font-size: 1.25rem;
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.25;
@@ -241,7 +293,7 @@ a {
 .page-header p {
   margin: 0.35rem 0 0;
   color: var(--text-secondary);
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
   line-height: 1.5;
   max-width: 34rem;
 }
@@ -285,13 +337,14 @@ a {
 
 .empty-state h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 1.125rem;
   font-weight: 500;
+  color: var(--text-secondary);
 }
 
 .empty-state p {
   margin: 0.5rem auto 0;
-  max-width: 20rem;
+  max-width: 15rem;
   color: var(--text-secondary);
   font-size: 0.875rem;
 }
@@ -315,14 +368,14 @@ a {
 }
 
 .btn:disabled {
-  opacity: 0.45;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
 .btn--primary {
   width: 100%;
   background: var(--accent);
-  color: var(--surface);
+  color: var(--accent-contrast);
 }
 
 .btn--primary:hover:not(:disabled) {
@@ -331,7 +384,7 @@ a {
 
 .btn--secondary {
   width: 100%;
-  background: transparent;
+  background: var(--surface);
   color: var(--text);
   border-color: var(--border);
 }
@@ -342,6 +395,7 @@ a {
 }
 
 .btn--ghost {
+  width: auto;
   background: transparent;
   color: var(--text-secondary);
   border-color: transparent;
@@ -380,9 +434,9 @@ a {
 }
 
 .chip--active {
-  border-color: var(--text);
-  background: var(--text);
-  color: var(--surface);
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast);
   font-weight: 600;
 }
 
@@ -403,8 +457,6 @@ a {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  border-radius: 16px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .day-card__top {
@@ -514,7 +566,7 @@ a {
   border-radius: 999px;
   font-size: 0.75rem;
   font-weight: 600;
-  background: var(--success-bg);
+  background: color-mix(in srgb, var(--success) 14%, var(--surface));
   color: var(--success);
 }
 
@@ -548,7 +600,7 @@ a {
   width: 100%;
   height: 6px;
   border-radius: 999px;
-  background: var(--border-light);
+  background: var(--inset);
   overflow: hidden;
 }
 
@@ -571,8 +623,8 @@ a {
 
 .login-card h1 {
   margin: 0;
-  font-size: 1.75rem;
-  font-weight: 650;
+  font-size: 1.5rem;
+  font-weight: 600;
   letter-spacing: -0.03em;
   line-height: 1.15;
 }
@@ -604,7 +656,7 @@ a {
 
 .toggle-row--inset {
   padding: 0.85rem 0 0;
-  border-top: 1px solid var(--border-light);
+  border-top: 1px solid var(--border);
   margin-top: 0.25rem;
 }
 
@@ -641,7 +693,7 @@ a {
   position: absolute;
   inset: 0;
   border-radius: 999px;
-  background: var(--border);
+  background: var(--inset);
   transition: background 0.15s ease;
 }
 
@@ -664,4 +716,5 @@ a {
 
 .toggle input:checked + span::after {
   transform: translateX(18px);
+  background: var(--accent-contrast);
 }

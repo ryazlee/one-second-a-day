@@ -1,5 +1,4 @@
 import { Providers } from "./providers";
-import { SiteFooter } from "@/src/components/SiteFooter";
 import "./globals.css";
 
 export const metadata = {
@@ -7,20 +6,35 @@ export const metadata = {
   description: "Make a watermark-free one-second-a-day video from Google Photos",
 };
 
+const themeInitScript = `
+try {
+  var saved = localStorage.getItem('one-second-a-day-theme');
+  var dark =
+    saved === 'dark' ||
+    (saved !== 'light' &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches);
+  if (dark) {
+    document.documentElement.classList.add('theme-dark');
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute('content', '#111827');
+  }
+} catch (e) {}
+`;
+
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <meta name="theme-color" content="#fafafa" />
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
       <body>
-        <Providers>
-          <div className="app-shell">
-            {children}
-            <SiteFooter />
-          </div>
-        </Providers>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );
