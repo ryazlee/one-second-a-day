@@ -1,0 +1,6 @@
+name = "one-second-a-day-proxy"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+[vars]
+# no secrets needed — the browser sends the user's Google access token per request

@@ -133,32 +133,3 @@ export async function listPickerMediaItems(
   }
   return res.json();
 }
-
-export async function ensureMediaProxyWorker(): Promise<void> {
-  if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
-
-  const base = getBasePath();
-  const swUrl = `${base}/sw.js`;
-
-  const reg = await navigator.serviceWorker.register(swUrl, {
-    scope: `${base}/` || "/",
-  });
-
-  if (navigator.serviceWorker.controller) return;
-
-  await new Promise<void>((resolve) => {
-    const onController = () => {
-      navigator.serviceWorker.removeEventListener(
-        "controllerchange",
-        onController
-      );
-      resolve();
-    };
-    navigator.serviceWorker.addEventListener("controllerchange", onController);
-    // Already active from a previous visit
-    if (reg.active) {
-      reg.active.postMessage({ type: "claim" });
-    }
-    window.setTimeout(() => resolve(), 1500);
-  });
-}

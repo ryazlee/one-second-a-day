@@ -32,11 +32,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
-        run: npm run build
+      - name: Build static export
+        run: |
+          # API routes are for local next dev only — strip them for Pages export.
+          rm -rf app/api
+          npm run build
         env:
+          STATIC_EXPORT: "true"
           NEXT_PUBLIC_BASE_PATH: /one-second-a-day
           NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${{ secrets.NEXT_PUBLIC_GOOGLE_CLIENT_ID }}
+          NEXT_PUBLIC_MEDIA_PROXY_URL: ${{ secrets.NEXT_PUBLIC_MEDIA_PROXY_URL }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v6

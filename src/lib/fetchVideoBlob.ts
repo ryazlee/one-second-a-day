@@ -1,7 +1,15 @@
 import { MediaItem } from "@/src/types/types";
-import { ensureMediaProxyWorker, getBasePath } from "@/src/lib/googleClient";
 
 const blobCache = new Map<string, Blob>();
+
+function mediaProxyEndpoint(target: string): string {
+  const external = process.env.NEXT_PUBLIC_MEDIA_PROXY_URL?.replace(/\/$/, "");
+  if (external) {
+    return `${external}?url=${encodeURIComponent(target)}`;
+  }
+  // Local `next dev` uses the Next.js route handler.
+  return `/api/photos/proxy?url=${encodeURIComponent(target)}`;
+}
 
 export async function fetchVideoBlob(
   video: MediaItem,
@@ -10,10 +18,8 @@ export async function fetchVideoBlob(
   const cached = blobCache.get(video.id);
   if (cached) return cached;
 
-  await ensureMediaProxyWorker();
-
   const target = `${video.mediaFile.baseUrl}=dv`;
-  const proxyUrl = `${getBasePath()}/media-proxy?url=${encodeURIComponent(target)}`;
+  const proxyUrl = mediaProxyEndpoint(target);
 
   const res = await fetch(proxyUrl, {
     headers: { Authorization: `Bearer ${accessToken}` },
