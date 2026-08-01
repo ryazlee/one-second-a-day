@@ -1,12 +1,17 @@
 import { Providers } from "./providers";
 import "./globals.css";
 
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+
 export const metadata = {
   title: "1 Second a Day",
   description: "Make a watermark-free one-second-a-day video from Google Photos",
   icons: {
-    icon: [{ url: "/icon.png", type: "image/png" }],
-    apple: [{ url: "/apple-touch-icon.png" }],
+    icon: [
+      { url: `${basePath}/favicon.ico`, sizes: "any" },
+      { url: `${basePath}/icon.png`, type: "image/png" },
+    ],
+    apple: [{ url: `${basePath}/apple-touch-icon.png` }],
   },
 };
 
