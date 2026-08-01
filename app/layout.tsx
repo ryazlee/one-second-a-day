@@ -4,6 +4,10 @@ import "./globals.css";
 export const metadata = {
   title: "1 Second a Day",
   description: "Make a watermark-free one-second-a-day video from Google Photos",
+  icons: {
+    icon: [{ url: "/icon.png", type: "image/png" }],
+    apple: [{ url: "/apple-touch-icon.png" }],
+  },
 };
 
 const themeInitScript = `
