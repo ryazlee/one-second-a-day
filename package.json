@@ -2,6 +2,7 @@
   "name": "one-second-a-day",
   "version": "0.1.0",
   "private": true,
+  "homepage": "https://ryazlee.github.io/one-second-a-day",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

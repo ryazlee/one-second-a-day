@@ -1,4 +1,5 @@
 import { Providers } from "./providers";
+import { SiteFooter } from "@/src/components/SiteFooter";
 import "./globals.css";
 
 export const metadata = {
@@ -15,7 +16,10 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <Providers>
-          <div className="app-shell">{children}</div>
+          <div className="app-shell">
+            {children}
+            <SiteFooter />
+          </div>
         </Providers>
       </body>
     </html>

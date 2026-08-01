@@ -12,33 +12,29 @@ import { useExport } from "@/src/hooks/useExport";
 import { usePhotosPicker } from "@/src/hooks/usePhotosPicker";
 import { useVideos } from "@/src/hooks/useVideos";
 import { groupVideosByDay } from "@/src/lib/groupVideos";
+import { requestGoogleAccessToken } from "@/src/lib/googleClient";
 import { ExportOrientation } from "@/src/types/types";
-import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useMemo, useState } from "react";
 
 export default function Home() {
   const { accessToken, setAccessToken } = useAccessToken();
   const [showDateStamp, setShowDateStamp] = useState(true);
   const [orientation, setOrientation] =
     useState<ExportOrientation>("portrait");
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   const { sessionId, isReady, isPolling, openPicker } =
     usePhotosPicker(accessToken);
 
-  useEffect(() => {
-    function handleMessage(event: MessageEvent) {
-      if (event.origin !== window.location.origin) return;
-
-      if (event.data?.type === "GOOGLE_OAUTH_SUCCESS") {
-        setAccessToken(event.data.accessToken);
-      }
+  async function loginWithGoogle() {
+    setLoginError(null);
+    try {
+      const token = await requestGoogleAccessToken();
+      setAccessToken(token);
+    } catch (err) {
+      setLoginError(err instanceof Error ? err.message : "Sign-in failed");
     }
-
-    window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
-  }, [setAccessToken]);
-
-  function loginWithGoogle() {
-    window.open("/api/oauth/login", "google-oauth", "width=500,height=600");
   }
 
   function signOut() {
@@ -62,7 +58,9 @@ export default function Home() {
     <>
       <header className="app-header">
         <div className="app-header-inner">
-          <p className="brand">1 Second a Day</p>
+          <Link href="/" className="brand">
+            1 Second a Day
+          </Link>
           {accessToken ? (
             <Button label="Sign out" variant="ghost" onClick={signOut} />
           ) : null}
@@ -81,6 +79,16 @@ export default function Home() {
                   export a clean compilation — no app, no watermark.
                 </p>
                 <Button label="Continue with Google" onClick={loginWithGoogle} />
+                {loginError ? (
+                  <p className="muted" style={{ color: "var(--danger)" }}>
+                    {loginError}
+                  </p>
+                ) : null}
+                <p className="login-legal muted">
+                  By continuing, you agree to the{" "}
+                  <Link href="/terms">Terms</Link> and{" "}
+                  <Link href="/privacy">Privacy Policy</Link>.
+                </p>
               </section>
             </Page>
           ) : (

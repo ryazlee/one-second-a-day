@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import {
+  createPickerSession,
+  getPickerSession,
+} from "@/src/lib/googleClient";
 
 interface PickerSession {
   sessionId: string | null;
@@ -15,13 +19,7 @@ export function usePhotosPicker(accessToken: string | null): PickerSession {
   const openPicker = useCallback(async () => {
     if (!accessToken) return;
 
-    const res = await fetch("/api/photos/picker/session", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ accessToken }),
-    });
-
-    const { pickerUri, id } = await res.json();
+    const { pickerUri, id } = await createPickerSession(accessToken);
     setSessionId(id);
     setIsReady(false);
     setIsPolling(true);
@@ -33,20 +31,15 @@ export function usePhotosPicker(accessToken: string | null): PickerSession {
     if (!sessionId || !accessToken || !isPolling) return;
 
     const interval = setInterval(async () => {
-      const res = await fetch(`/api/photos/picker/session/${sessionId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accessToken }),
-      });
-
-      if (!res.ok) return;
-
-      const data = await res.json();
-
-      if (data.mediaItemsSet) {
-        clearInterval(interval);
-        setIsPolling(false);
-        setIsReady(true);
+      try {
+        const data = await getPickerSession(accessToken, sessionId);
+        if (data.mediaItemsSet) {
+          clearInterval(interval);
+          setIsPolling(false);
+          setIsReady(true);
+        }
+      } catch {
+        // keep polling
       }
     }, 2000);
 

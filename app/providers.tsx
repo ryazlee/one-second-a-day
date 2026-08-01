@@ -1,7 +1,8 @@
 "use client";
 
+import { ensureMediaProxyWorker } from "@/src/lib/googleClient";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -14,6 +15,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
         },
       })
   );
+
+  useEffect(() => {
+    ensureMediaProxyWorker().catch(() => {
+      // Media loads will retry registration on demand.
+    });
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>

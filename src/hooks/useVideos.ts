@@ -1,26 +1,15 @@
-// src/hooks/useVideos.ts
 import { useQuery } from "@tanstack/react-query";
+import { listPickerMediaItems } from "@/src/lib/googleClient";
 import { MediaItem } from "@/src/types/types";
 
 async function fetchVideos(
   accessToken: string,
   sessionId: string
 ): Promise<MediaItem[]> {
-  const res = await fetch(`/api/photos/picker/media-items/${sessionId}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ accessToken }),
-  });
-
-  if (!res.ok) {
-    throw new Error("Failed to fetch media items");
-  }
-
-  const data = await res.json();
+  const data = await listPickerMediaItems(accessToken, sessionId);
   const videos = (data.mediaItems || []).filter(
     (item: MediaItem) => item.type === "VIDEO"
   );
-
   return videos;
 }
 

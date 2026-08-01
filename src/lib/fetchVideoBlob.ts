@@ -1,4 +1,5 @@
 import { MediaItem } from "@/src/types/types";
+import { ensureMediaProxyWorker, getBasePath } from "@/src/lib/googleClient";
 
 const blobCache = new Map<string, Blob>();
 
@@ -9,9 +10,10 @@ export async function fetchVideoBlob(
   const cached = blobCache.get(video.id);
   if (cached) return cached;
 
-  const proxyUrl = `/api/photos/proxy?url=${encodeURIComponent(
-    video.mediaFile.baseUrl + "=dv"
-  )}`;
+  await ensureMediaProxyWorker();
+
+  const target = `${video.mediaFile.baseUrl}=dv`;
+  const proxyUrl = `${getBasePath()}/media-proxy?url=${encodeURIComponent(target)}`;
 
   const res = await fetch(proxyUrl, {
     headers: { Authorization: `Bearer ${accessToken}` },
