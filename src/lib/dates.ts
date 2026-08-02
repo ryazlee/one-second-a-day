@@ -1,5 +1,9 @@
 export function dayKeyFromIso(iso: string): string {
-  return new Date(iso).toISOString().slice(0, 10);
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return "unknown";
+  }
+  return date.toISOString().slice(0, 10);
 }
 
 export function formatDayLabel(dayKey: string): string {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createPickerSession,
   getPickerSession,
@@ -63,8 +63,26 @@ export function usePhotosPicker(accessToken: string | null): PickerSession {
   const [isReady, setIsReady] = useState(false);
   const [isPolling, setIsPolling] = useState(false);
   const [pollToken, setPollToken] = useState<string | null>(null);
+  const readySessionRef = useRef<string | null>(null);
+
+  const markReady = useCallback((id: string) => {
+    clearPending();
+    readySessionRef.current = id;
+    setSessionId(id);
+    setIsPolling(false);
+    setIsReady(true);
+  }, []);
 
   const beginPolling = useCallback((id: string, token: string) => {
+    // Don't thrash ready→unready for a session we already finished.
+    if (readySessionRef.current === id) {
+      clearPending();
+      setSessionId(id);
+      setIsReady(true);
+      setIsPolling(false);
+      return;
+    }
+
     setSessionId(id);
     setPollToken(token);
     setIsReady(false);
@@ -79,7 +97,7 @@ export function usePhotosPicker(accessToken: string | null): PickerSession {
   const cancelPolling = useCallback(() => {
     clearPending();
     setIsPolling(false);
-    setIsReady(false);
+    // Keep isReady/sessionId if we already have a loaded selection.
   }, []);
 
   // Resume a picker session after returning to this tab/page (mobile Back).
@@ -96,6 +114,9 @@ export function usePhotosPicker(accessToken: string | null): PickerSession {
   const openPicker = useCallback(async () => {
     if (!accessToken) return;
 
+    // New pick — allow a fresh session even if a prior one was ready.
+    readySessionRef.current = null;
+
     // Mobile: same-tab only. Google's picker can't run in an iframe, and
     // window.open after an async call often opens a blank/extra tab while also
     // leaving the app — which feels like "two pickers." Navigate away, pick,
@@ -111,7 +132,11 @@ export function usePhotosPicker(accessToken: string | null): PickerSession {
     // Desktop: open the popup synchronously in the click handler so blockers
     // don't leave a blank window + force a second navigation. Then point it at
     // the picker URI once the session exists (Google's recommended web flow).
-    const popup = window.open("about:blank", "photos-picker", "width=600,height=700");
+    const popup = window.open(
+      "about:blank",
+      "photos-picker",
+      "width=600,height=700"
+    );
 
     try {
       const { pickerUri, id } = await createPickerSession(accessToken);
@@ -142,9 +167,7 @@ export function usePhotosPicker(accessToken: string | null): PickerSession {
         const data = await getPickerSession(pollToken!, sessionId!);
         if (cancelled) return;
         if (data.mediaItemsSet) {
-          clearPending();
-          setIsPolling(false);
-          setIsReady(true);
+          markReady(sessionId!);
         }
       } catch {
         // keep polling
@@ -177,7 +200,7 @@ export function usePhotosPicker(accessToken: string | null): PickerSession {
       window.removeEventListener("pageshow", onPageShow);
       window.removeEventListener("focus", onVisible);
     };
-  }, [sessionId, pollToken, isPolling]);
+  }, [sessionId, pollToken, isPolling, markReady]);
 
   return {
     sessionId,

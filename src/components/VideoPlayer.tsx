@@ -22,37 +22,40 @@ export function VideoPlayer({
   orientation: ExportOrientation;
   onDuration?: (duration: number) => void;
 }) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const videoElRef = useRef<HTMLVideoElement | null>(null);
+  const videoRef = useRef(video);
+  videoRef.current = video;
+
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let revoked = false;
-    let currentUrl: string | null = null;
+    let cancelled = false;
+    let createdUrl: string | null = null;
 
     async function load() {
       setError(null);
       setBlobUrl(null);
       try {
-        const blob = await fetchVideoBlob(video, accessToken);
-        if (revoked) return;
-        currentUrl = URL.createObjectURL(blob);
-        setBlobUrl(currentUrl);
+        const blob = await fetchVideoBlob(videoRef.current, accessToken);
+        if (cancelled) return;
+        createdUrl = URL.createObjectURL(blob);
+        setBlobUrl(createdUrl);
       } catch {
-        if (!revoked) setError("Couldn’t load this video.");
+        if (!cancelled) setError("Couldn’t load this video.");
       }
     }
 
-    load();
+    void load();
 
     return () => {
-      revoked = true;
-      if (currentUrl) URL.revokeObjectURL(currentUrl);
+      cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
-  }, [video, accessToken]);
+  }, [video.id, accessToken]);
 
   useEffect(() => {
-    const el = videoRef.current;
+    const el = videoElRef.current;
     if (!el || !blobUrl) return;
 
     const applyStart = () => {
@@ -92,12 +95,17 @@ export function VideoPlayer({
       }`}
     >
       <video
-        ref={videoRef}
+        ref={videoElRef}
         src={blobUrl}
         controls
         playsInline
         preload="metadata"
-        onLoadedMetadata={(e) => onDuration?.(e.currentTarget.duration)}
+        onLoadedMetadata={(e) => {
+          const duration = e.currentTarget.duration;
+          if (Number.isFinite(duration) && duration > 0) {
+            onDuration?.(duration);
+          }
+        }}
       />
       {showDateStamp ? (
         <div className="video-frame__stamp">{formatStamp(dayKey)}</div>

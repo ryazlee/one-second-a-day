@@ -35,7 +35,11 @@ export function DayCard({
     [videos, selection.mediaId]
   );
 
-  const maxStart = Math.max(0, duration - 1);
+  const maxStart = Math.max(0, (Number.isFinite(duration) ? duration : 1) - 1);
+
+  function handleDuration(next: number) {
+    setDuration((prev) => (Math.abs(prev - next) < 0.01 ? prev : next));
+  }
 
   return (
     <article className="surface-card day-card">
@@ -65,7 +69,7 @@ export function DayCard({
         showDateStamp={showDateStamp}
         dayKey={date}
         orientation={orientation}
-        onDuration={setDuration}
+        onDuration={handleDuration}
       />
 
       <div className="trim-controls">

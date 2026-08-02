@@ -10,7 +10,7 @@ import { useAccessToken } from "@/src/hooks/useAccessToken";
 import { useDaySelections } from "@/src/hooks/useDaySelections";
 import { useExport } from "@/src/hooks/useExport";
 import { usePhotosPicker } from "@/src/hooks/usePhotosPicker";
-import { useVideos } from "@/src/hooks/useVideos";
+import { EMPTY_VIDEOS, useVideos } from "@/src/hooks/useVideos";
 import { groupVideosByDay } from "@/src/lib/groupVideos";
 import { requestGoogleAccessToken } from "@/src/lib/googleClient";
 import { ExportOrientation } from "@/src/types/types";
@@ -37,10 +37,11 @@ export default function Home() {
     }
   }
 
-  const { data: videos = [], isLoading: videosLoading } = useVideos(
-    isReady ? accessToken : null,
-    isReady ? sessionId : null
-  );
+  const { data, isLoading: videosLoading, isError, error: videosError } =
+    useVideos(isReady ? accessToken : null, isReady ? sessionId : null);
+  // Stable empty fallback — `= []` allocates a new array every render and can
+  // thrash memoized children after a query update.
+  const videos = data ?? EMPTY_VIDEOS;
 
   const videosByDay = useMemo(() => groupVideosByDay(videos), [videos]);
   const { days, selections, includedDays, updateDay } =
@@ -124,6 +125,14 @@ export default function Home() {
 
               {videosLoading ? (
                 <p className="muted">Loading videos…</p>
+              ) : null}
+
+              {isError ? (
+                <p className="muted" style={{ color: "var(--danger)" }}>
+                  {videosError instanceof Error
+                    ? videosError.message
+                    : "Couldn’t load your Photos selection."}
+                </p>
               ) : null}
 
               {hasVideos ? (
