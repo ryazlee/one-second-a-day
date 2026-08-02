@@ -82,7 +82,7 @@ export function usePhotosPicker(accessToken: string | null): PickerSession {
     setIsReady(false);
   }, []);
 
-  // Resume a picker session after mobile returns to this tab/page.
+  // Resume a picker session after returning to this tab/page (mobile Back).
   useEffect(() => {
     if (!accessToken) return;
 
@@ -96,31 +96,39 @@ export function usePhotosPicker(accessToken: string | null): PickerSession {
   const openPicker = useCallback(async () => {
     if (!accessToken) return;
 
-    const { pickerUri, id } = await createPickerSession(accessToken);
-    beginPolling(id, accessToken);
-
+    // Mobile: same-tab only. Google's picker can't run in an iframe, and
+    // window.open after an async call often opens a blank/extra tab while also
+    // leaving the app — which feels like "two pickers." Navigate away, pick,
+    // then use Back; session is persisted so we resume polling on return.
     if (isMobileViewport()) {
-      // Mobile browsers throttle/kill desktop-style popups. Prefer a new tab
-      // with /autoclose; if blocked, same-tab navigate without autoclose so the
-      // user can return with the browser Back button.
-      const opened = window.open(
-        withAutoclose(pickerUri),
-        "_blank",
-        "noopener,noreferrer"
-      );
-      if (!opened) {
-        window.location.assign(pickerUri);
-      }
+      const { pickerUri, id } = await createPickerSession(accessToken);
+      beginPolling(id, accessToken);
+      // No /autoclose — that would close the only tab. User returns via Back.
+      window.location.assign(pickerUri);
       return;
     }
 
-    const popup = window.open(
-      withAutoclose(pickerUri),
-      "photos-picker",
-      "width=600,height=700"
-    );
-    if (!popup) {
+    // Desktop: open the popup synchronously in the click handler so blockers
+    // don't leave a blank window + force a second navigation. Then point it at
+    // the picker URI once the session exists (Google's recommended web flow).
+    const popup = window.open("about:blank", "photos-picker", "width=600,height=700");
+
+    try {
+      const { pickerUri, id } = await createPickerSession(accessToken);
+      beginPolling(id, accessToken);
+      const url = withAutoclose(pickerUri);
+
+      if (popup && !popup.closed) {
+        popup.location.href = url;
+        popup.focus();
+        return;
+      }
+
+      // Popup blocked — stay in-app and open Photos in this tab as a last resort.
       window.location.assign(pickerUri);
+    } catch (error) {
+      if (popup && !popup.closed) popup.close();
+      throw error;
     }
   }, [accessToken, beginPolling]);
 
@@ -143,7 +151,6 @@ export function usePhotosPicker(accessToken: string | null): PickerSession {
       }
     }
 
-    // Immediate check — important when returning from Google Photos on mobile.
     void checkOnce();
     const interval = setInterval(() => {
       void checkOnce();

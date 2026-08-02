@@ -109,8 +109,8 @@ export default function Home() {
                 {isPolling ? (
                   <div className="picker-wait">
                     <p className="muted">
-                      Finish picking in Google Photos, then return here (switch
-                      tabs or use Back). Your selection will load automatically.
+                      Finish picking in Google Photos, then come back here (use
+                      Back on phone). Your selection will load automatically.
                     </p>
                     <Button
                       label="Cancel"
