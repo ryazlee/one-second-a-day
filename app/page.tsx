@@ -24,7 +24,7 @@ export default function Home() {
     useState<ExportOrientation>("portrait");
   const [loginError, setLoginError] = useState<string | null>(null);
 
-  const { sessionId, isReady, isPolling, openPicker } =
+  const { sessionId, isReady, isPolling, openPicker, cancelPolling } =
     usePhotosPicker(accessToken);
 
   async function loginWithGoogle() {
@@ -106,6 +106,20 @@ export default function Home() {
                     disabled={isPolling || isExporting}
                   />
                 </div>
+                {isPolling ? (
+                  <div className="picker-wait">
+                    <p className="muted">
+                      Finish picking in Google Photos, then return here (switch
+                      tabs or use Back). Your selection will load automatically.
+                    </p>
+                    <Button
+                      label="Cancel"
+                      variant="ghost"
+                      size="sm"
+                      onClick={cancelPolling}
+                    />
+                  </div>
+                ) : null}
               </SectionCard>
 
               {videosLoading ? (

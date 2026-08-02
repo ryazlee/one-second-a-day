@@ -646,6 +646,14 @@ a {
   align-items: center;
 }
 
+.picker-wait {
+  margin-top: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+}
+
 .toggle-row {
   display: flex;
   align-items: center;
