@@ -12,7 +12,6 @@ function mediaProxyEndpoint(target: string): string {
     return `${external}?url=${encodeURIComponent(target)}`;
   }
 
-  // Local `next dev` uses the Next.js route handler.
   if (typeof window !== "undefined") {
     const host = window.location.hostname;
     if (host === "localhost" || host === "127.0.0.1") {
@@ -25,26 +24,33 @@ function mediaProxyEndpoint(target: string): string {
   );
 }
 
+function downloadUrlFor(item: MediaItem): string {
+  const base = item.mediaFile.baseUrl;
+  // Picker baseUrl download params: videos use =dv, photos use =d.
+  return item.type === "PHOTO" ? `${base}=d` : `${base}=dv`;
+}
+
 export async function fetchVideoBlob(
-  video: MediaItem,
+  item: MediaItem,
   accessToken: string
 ): Promise<Blob> {
-  const cached = blobCache.get(video.id);
+  const cached = blobCache.get(item.id);
   if (cached) return cached;
 
-  const target = `${video.mediaFile.baseUrl}=dv`;
-  const proxyUrl = mediaProxyEndpoint(target);
+  const proxyUrl = mediaProxyEndpoint(downloadUrlFor(item));
 
   const res = await fetch(proxyUrl, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 
   if (!res.ok) {
-    throw new Error(`Failed to fetch video (${res.status})`);
+    throw new Error(
+      `Failed to fetch ${item.type === "PHOTO" ? "photo" : "video"} (${res.status})`
+    );
   }
 
   const blob = await res.blob();
-  blobCache.set(video.id, blob);
+  blobCache.set(item.id, blob);
   return blob;
 }
 

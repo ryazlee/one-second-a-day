@@ -23,7 +23,11 @@ type GisOauth2 = {
   initTokenClient: (config: {
     client_id: string;
     scope: string;
-    callback: (response: { access_token?: string; error?: string }) => void;
+    callback: (response: {
+      access_token?: string;
+      expires_in?: number | string;
+      error?: string;
+    }) => void;
   }) => GisTokenClient;
 };
 
@@ -67,7 +71,9 @@ export function loadGoogleIdentity(): Promise<void> {
   return gisLoading;
 }
 
-export async function requestGoogleAccessToken(): Promise<string> {
+export async function requestGoogleAccessToken(
+  prompt: "" | "consent" = "consent"
+): Promise<{ accessToken: string; expiresIn: number }> {
   await loadGoogleIdentity();
   const oauth2 = window.google?.accounts?.oauth2;
   if (!oauth2) throw new Error("Google Identity Services unavailable");
@@ -83,10 +89,20 @@ export async function requestGoogleAccessToken(): Promise<string> {
           reject(new Error(response.error || "Google sign-in failed"));
           return;
         }
-        resolve(response.access_token);
+        const raw = response.expires_in;
+        const expiresIn =
+          typeof raw === "number"
+            ? raw
+            : typeof raw === "string"
+              ? Number(raw)
+              : 3600;
+        resolve({
+          accessToken: response.access_token,
+          expiresIn: Number.isFinite(expiresIn) ? expiresIn : 3600,
+        });
       },
     });
-    client.requestAccessToken({ prompt: "consent" });
+    client.requestAccessToken({ prompt });
   });
 }
 

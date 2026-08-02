@@ -2,107 +2,95 @@
 
 import { Button } from "@/src/components/Button";
 import { DayCard } from "@/src/components/DayCard";
+import { Landing } from "@/src/components/Landing";
 import { Page } from "@/src/components/Page";
-import { PageHeader } from "@/src/components/PageHeader";
 import { SectionCard } from "@/src/components/SectionCard";
 import { StickyActionBar } from "@/src/components/StickyActionBar";
 import { useAccessToken } from "@/src/hooks/useAccessToken";
 import { useDaySelections } from "@/src/hooks/useDaySelections";
 import { useExport } from "@/src/hooks/useExport";
 import { usePhotosPicker } from "@/src/hooks/usePhotosPicker";
-import { EMPTY_VIDEOS, useVideos } from "@/src/hooks/useVideos";
+import { EMPTY_MEDIA, useVideos } from "@/src/hooks/useVideos";
 import { groupVideosByDay } from "@/src/lib/groupVideos";
 import { requestGoogleAccessToken } from "@/src/lib/googleClient";
 import { ExportOrientation } from "@/src/types/types";
-import Link from "next/link";
 import { useMemo, useState } from "react";
 
 export default function Home() {
-  const { accessToken, setAccessToken } = useAccessToken();
+  const { accessToken, setAccessToken, authReady } = useAccessToken();
   const [showDateStamp, setShowDateStamp] = useState(true);
+  const [onePerDay, setOnePerDay] = useState(true);
   const [orientation, setOrientation] =
     useState<ExportOrientation>("portrait");
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [signingIn, setSigningIn] = useState(false);
 
   const { sessionId, isReady, isPolling, openPicker, cancelPolling } =
     usePhotosPicker(accessToken);
 
   async function loginWithGoogle() {
     setLoginError(null);
+    setSigningIn(true);
     try {
-      const token = await requestGoogleAccessToken();
-      setAccessToken(token);
+      const token = await requestGoogleAccessToken("consent");
+      setAccessToken(token.accessToken, token.expiresIn);
     } catch (err) {
       setLoginError(err instanceof Error ? err.message : "Sign-in failed");
+    } finally {
+      setSigningIn(false);
     }
   }
 
   const { data, isLoading: videosLoading, isError, error: videosError } =
     useVideos(isReady ? accessToken : null, isReady ? sessionId : null);
-  // Stable empty fallback — `= []` allocates a new array every render and can
-  // thrash memoized children after a query update.
-  const videos = data ?? EMPTY_VIDEOS;
+  const media = data ?? EMPTY_MEDIA;
 
-  const videosByDay = useMemo(() => groupVideosByDay(videos), [videos]);
-  const { days, selections, includedDays, updateDay } =
-    useDaySelections(videosByDay);
+  const mediaByDay = useMemo(() => groupVideosByDay(media), [media]);
+  const { days, selections, includedDays, includedClipCount, updateDay } =
+    useDaySelections(mediaByDay, onePerDay);
 
   const { isExporting, progress, label, error, exportVideo } = useExport();
 
-  const hasVideos = days.length > 0;
+  const hasMedia = days.length > 0;
+  const exportSeconds = includedClipCount + 1;
+
+  if (!authReady) {
+    return (
+      <main className="app-main">
+        <div className="shell-inner">
+          <p className="muted" style={{ textAlign: "center", padding: "3rem 0" }}>
+            Loading…
+          </p>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <>
-      <main className={hasVideos ? "app-main app-main--with-action" : "app-main"}>
+      <main className={hasMedia ? "app-main app-main--with-action" : "app-main"}>
         <div className="shell-inner">
           {!accessToken ? (
             <Page>
-              <section className="surface-card login-card">
-                <p className="section-label">Google Photos</p>
-                <h1>Sign in to continue</h1>
-                <p>
-                  Pick videos from any month, choose one second per day, and
-                  export a clean compilation in your browser.
-                </p>
-                <Button label="Continue with Google" onClick={loginWithGoogle} />
-                {loginError ? (
-                  <p className="muted" style={{ color: "var(--danger)" }}>
-                    {loginError}
-                  </p>
-                ) : null}
-                <p className="login-legal muted">
-                  By continuing, you agree to the{" "}
-                  <Link href="/terms">Terms</Link> and{" "}
-                  <Link href="/privacy">Privacy Policy</Link>.
-                </p>
-              </section>
+              <Landing
+                onLogin={loginWithGoogle}
+                loginError={loginError}
+                signingIn={signingIn}
+              />
             </Page>
           ) : (
-            <Page withActionBar={hasVideos}>
-              <PageHeader
-                title="Your days"
-                subtitle="Select clips from Google Photos, trim each day to one second, then export."
-                action={
-                  accessToken ? (
-                    <span className="status-pill">Signed in</span>
-                  ) : null
-                }
-              />
-
-              <SectionCard
-                title="Source"
-                subtitle="Use the Photos picker to grab videos from any date range. Days without footage are skipped."
-              >
+            <Page withActionBar={hasMedia}>
+              <SectionCard title="Source">
                 <div className="toolbar-row">
                   <Button
                     label={
                       isPolling
                         ? "Waiting for selection…"
-                        : hasVideos
+                        : hasMedia
                           ? "Add more from Photos"
-                          : "Select videos from Google Photos"
+                          : "Select from Google Photos"
                     }
-                    variant={hasVideos ? "secondary" : "primary"}
+                    variant={hasMedia ? "secondary" : "primary"}
                     onClick={openPicker}
                     disabled={isPolling || isExporting}
                   />
@@ -110,8 +98,7 @@ export default function Home() {
                 {isPolling ? (
                   <div className="picker-wait">
                     <p className="muted">
-                      Finish picking in Google Photos, then come back here (use
-                      Back on phone). Your selection will load automatically.
+                      Finish in Google Photos, then return here.
                     </p>
                     <Button
                       label="Cancel"
@@ -124,7 +111,7 @@ export default function Home() {
               </SectionCard>
 
               {videosLoading ? (
-                <p className="muted">Loading videos…</p>
+                <p className="muted">Loading media…</p>
               ) : null}
 
               {isError ? (
@@ -135,16 +122,12 @@ export default function Home() {
                 </p>
               ) : null}
 
-              {hasVideos ? (
+              {hasMedia ? (
                 <>
-                  <SectionCard title="Export settings">
+                  <SectionCard title="Export">
                     <div className="settings-stack">
                       <div className="settings-block">
                         <p className="section-label">Orientation</p>
-                        <p className="muted" style={{ marginTop: 4 }}>
-                          Output size is 1080×1920 portrait or 1920×1080 landscape.
-                          Clips are letterboxed to fit.
-                        </p>
                         <div className="chip-row" style={{ marginTop: 10 }}>
                           <button
                             type="button"
@@ -167,8 +150,24 @@ export default function Home() {
 
                       <label className="toggle-row toggle-row--inset">
                         <div>
+                          <strong>One clip per day</strong>
+                          <p>Off allows multiple seconds from the same day.</p>
+                        </div>
+                        <span className="toggle">
+                          <input
+                            type="checkbox"
+                            checked={onePerDay}
+                            onChange={(e) => setOnePerDay(e.target.checked)}
+                            disabled={isExporting}
+                          />
+                          <span />
+                        </span>
+                      </label>
+
+                      <label className="toggle-row toggle-row--inset">
+                        <div>
                           <strong>Date stamp</strong>
-                          <p>Burn the day onto each second in the export.</p>
+                          <p>Burn the day onto each second.</p>
                         </div>
                         <span className="toggle">
                           <input
@@ -183,9 +182,8 @@ export default function Home() {
                   </SectionCard>
 
                   <p className="section-label">
-                    {includedDays.length} day
-                    {includedDays.length === 1 ? "" : "s"} included ·{" "}
-                    {includedDays.length + 1}s total
+                    {includedClipCount} clip
+                    {includedClipCount === 1 ? "" : "s"} · {exportSeconds}s
                   </p>
                   <div className="day-grid">
                     {days.map((day) => {
@@ -195,11 +193,12 @@ export default function Home() {
                         <DayCard
                           key={day}
                           date={day}
-                          videos={videosByDay[day]}
+                          items={mediaByDay[day]}
                           accessToken={accessToken}
                           selection={selection}
                           showDateStamp={showDateStamp}
                           orientation={orientation}
+                          onePerDay={onePerDay}
                           onChange={(next) => updateDay(day, next)}
                         />
                       );
@@ -218,7 +217,7 @@ export default function Home() {
         </div>
       </main>
 
-      {accessToken && hasVideos ? (
+      {accessToken && hasMedia ? (
         <StickyActionBar>
           {isExporting ? (
             <>
@@ -232,21 +231,21 @@ export default function Home() {
             </>
           ) : (
             <p className="sticky-action__meta">
-              Export {includedDays.length}s + 1s credit · {orientation}
+              {includedClipCount}s + 1s credit · {orientation}
             </p>
           )}
           <Button
             label={
               isExporting
                 ? "Exporting…"
-                : `Export ${includedDays.length + 1}s ${orientation}`
+                : `Export ${exportSeconds}s`
             }
-            disabled={isExporting || includedDays.length === 0}
+            disabled={isExporting || includedClipCount === 0}
             onClick={() =>
               exportVideo({
                 days: includedDays,
                 selections,
-                videosByDay,
+                videosByDay: mediaByDay,
                 accessToken,
                 showDateStamp,
                 orientation,

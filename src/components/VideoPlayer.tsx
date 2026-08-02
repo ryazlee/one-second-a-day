@@ -23,8 +23,9 @@ export function VideoPlayer({
   onDuration?: (duration: number) => void;
 }) {
   const videoElRef = useRef<HTMLVideoElement | null>(null);
-  const videoRef = useRef(video);
-  videoRef.current = video;
+  const itemRef = useRef(video);
+  itemRef.current = video;
+  const isPhoto = video.type === "PHOTO";
 
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,12 +38,16 @@ export function VideoPlayer({
       setError(null);
       setBlobUrl(null);
       try {
-        const blob = await fetchVideoBlob(videoRef.current, accessToken);
+        const blob = await fetchVideoBlob(itemRef.current, accessToken);
         if (cancelled) return;
         createdUrl = URL.createObjectURL(blob);
         setBlobUrl(createdUrl);
       } catch {
-        if (!cancelled) setError("Couldn’t load this video.");
+        if (!cancelled) {
+          setError(
+            isPhoto ? "Couldn’t load this photo." : "Couldn’t load this video."
+          );
+        }
       }
     }
 
@@ -52,9 +57,14 @@ export function VideoPlayer({
       cancelled = true;
       if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
-  }, [video.id, accessToken]);
+  }, [video.id, accessToken, isPhoto]);
 
   useEffect(() => {
+    if (isPhoto) {
+      onDuration?.(1);
+      return;
+    }
+
     const el = videoElRef.current;
     if (!el || !blobUrl) return;
 
@@ -70,7 +80,9 @@ export function VideoPlayer({
     else el.addEventListener("loadedmetadata", applyStart, { once: true });
 
     return () => el.removeEventListener("loadedmetadata", applyStart);
-  }, [startSeconds, blobUrl]);
+    // Intentionally omit onDuration — parent may pass an unstable callback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startSeconds, blobUrl, isPhoto]);
 
   if (error) {
     return (
@@ -83,7 +95,9 @@ export function VideoPlayer({
   if (!blobUrl) {
     return (
       <div className="video-frame">
-        <div className="video-loading">Loading video…</div>
+        <div className="video-loading">
+          {isPhoto ? "Loading photo…" : "Loading video…"}
+        </div>
       </div>
     );
   }
@@ -94,19 +108,24 @@ export function VideoPlayer({
         orientation === "landscape" ? "video-frame--landscape" : ""
       }`}
     >
-      <video
-        ref={videoElRef}
-        src={blobUrl}
-        controls
-        playsInline
-        preload="metadata"
-        onLoadedMetadata={(e) => {
-          const duration = e.currentTarget.duration;
-          if (Number.isFinite(duration) && duration > 0) {
-            onDuration?.(duration);
-          }
-        }}
-      />
+      {isPhoto ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={blobUrl} alt="" className="video-frame__photo" />
+      ) : (
+        <video
+          ref={videoElRef}
+          src={blobUrl}
+          controls
+          playsInline
+          preload="metadata"
+          onLoadedMetadata={(e) => {
+            const duration = e.currentTarget.duration;
+            if (Number.isFinite(duration) && duration > 0) {
+              onDuration?.(duration);
+            }
+          }}
+        />
+      )}
       {showDateStamp ? (
         <div className="video-frame__stamp">{formatStamp(dayKey)}</div>
       ) : null}

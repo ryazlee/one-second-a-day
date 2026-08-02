@@ -15,9 +15,6 @@ export function AppHeader() {
           <Link href="/" className="brand">
             1 Second a Day
           </Link>
-          <p className="subtitle">
-            One second a day from Google Photos — export in your browser.
-          </p>
         </div>
         <div className="header-actions">
           {accessToken ? (

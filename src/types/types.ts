@@ -33,11 +33,17 @@ export type MediaItem = {
   mediaFile: MediaFile;
 };
 
-export type DaySelection = {
-  dayKey: string;
+/** One exported second from a single media item. */
+export type ClipSelection = {
   mediaId: string;
   startSeconds: number;
+};
+
+export type DaySelection = {
+  dayKey: string;
   included: boolean;
+  /** Ordered clips for this day. Length is 1 when one-per-day is on. */
+  clips: ClipSelection[];
 };
 
 export type ExportOrientation = "portrait" | "landscape";

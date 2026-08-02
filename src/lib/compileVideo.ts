@@ -5,6 +5,7 @@ export type CompileClip = {
   dayKey: string;
   blob: Blob;
   startSeconds: number;
+  kind: "video" | "photo";
 };
 
 export type CompileOptions = {
@@ -124,22 +125,24 @@ async function renderEndCard(ctx: CanvasRenderingContext2D): Promise<void> {
   }
 }
 
-function drawFrame(
+function drawMediaFrame(
   ctx: CanvasRenderingContext2D,
-  video: HTMLVideoElement,
+  source: CanvasImageSource,
+  sourceWidth: number,
+  sourceHeight: number,
   stamp: string | null
 ) {
   const { width, height } = ctx.canvas;
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, width, height);
 
-  if (video.videoWidth > 0 && video.videoHeight > 0) {
-    const scale = Math.min(width / video.videoWidth, height / video.videoHeight);
-    const w = video.videoWidth * scale;
-    const h = video.videoHeight * scale;
+  if (sourceWidth > 0 && sourceHeight > 0) {
+    const scale = Math.min(width / sourceWidth, height / sourceHeight);
+    const w = sourceWidth * scale;
+    const h = sourceHeight * scale;
     const x = (width - w) / 2;
     const y = (height - h) / 2;
-    ctx.drawImage(video, x, y, w, h);
+    ctx.drawImage(source, x, y, w, h);
   }
 
   if (stamp) {
@@ -153,6 +156,45 @@ function drawFrame(
     const stampY = height * 0.86;
     ctx.strokeText(stamp, width / 2, stampY);
     ctx.fillText(stamp, width / 2, stampY);
+  }
+}
+
+function drawFrame(
+  ctx: CanvasRenderingContext2D,
+  video: HTMLVideoElement,
+  stamp: string | null
+) {
+  drawMediaFrame(ctx, video, video.videoWidth, video.videoHeight, stamp);
+}
+
+function loadImage(blob: Blob): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.decoding = "async";
+    const url = URL.createObjectURL(blob);
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Failed to load photo for export"));
+    };
+    image.src = url;
+  });
+}
+
+async function renderStillClip(
+  ctx: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  stamp: string | null
+): Promise<void> {
+  const frameMs = 1000 / OUTPUT_FPS;
+  const frames = CLIP_DURATION * OUTPUT_FPS;
+
+  for (let i = 0; i < frames; i++) {
+    drawMediaFrame(ctx, image, image.naturalWidth, image.naturalHeight, stamp);
+    await wait(frameMs);
   }
 }
 
@@ -297,12 +339,18 @@ export async function compileOneSecondVideo({
       `Rendering ${i + 1} of ${clips.length}…`
     );
 
-    const video = await loadVideo(clip.blob);
     const stamp = showDateStamp ? formatStamp(clip.dayKey) : null;
-    await renderClipRealtime(ctx, video, clip.startSeconds, stamp, audioDest);
+
+    if (clip.kind === "photo") {
+      const image = await loadImage(clip.blob);
+      await renderStillClip(ctx, image, stamp);
+    } else {
+      const video = await loadVideo(clip.blob);
+      await renderClipRealtime(ctx, video, clip.startSeconds, stamp, audioDest);
+      URL.revokeObjectURL(video.src);
+    }
     // Tiny hold so clip boundaries don't glitch.
     await wait(30);
-    URL.revokeObjectURL(video.src);
   }
 
   onProgress?.(0.92, "Adding credit…");

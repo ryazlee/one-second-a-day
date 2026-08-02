@@ -37,23 +37,41 @@ export function useExport() {
       setLabel("Downloading clips…");
 
       try {
+        const jobs: { dayKey: string; item: MediaItem; startSeconds: number }[] =
+          [];
+
+        for (const dayKey of days) {
+          const selection = selections[dayKey];
+          if (!selection?.included) continue;
+          const dayItems = videosByDay[dayKey] ?? [];
+
+          for (const clip of selection.clips) {
+            const item = dayItems.find((media) => media.id === clip.mediaId);
+            if (!item) continue;
+            jobs.push({
+              dayKey,
+              item,
+              startSeconds: item.type === "PHOTO" ? 0 : clip.startSeconds,
+            });
+          }
+        }
+
+        if (jobs.length === 0) {
+          throw new Error("No clips selected to export");
+        }
+
         const clips = [];
 
-        for (let i = 0; i < days.length; i++) {
-          const dayKey = days[i];
-          const selection = selections[dayKey];
-          const video = videosByDay[dayKey].find(
-            (v) => v.id === selection.mediaId
-          );
-          if (!video) continue;
-
-          setProgress((i + 0.2) / (days.length + 1));
-          setLabel(`Downloading ${i + 1} of ${days.length}…`);
-          const blob = await fetchVideoBlob(video, accessToken);
+        for (let i = 0; i < jobs.length; i++) {
+          const job = jobs[i];
+          setProgress((i + 0.2) / (jobs.length + 1));
+          setLabel(`Downloading ${i + 1} of ${jobs.length}…`);
+          const blob = await fetchVideoBlob(job.item, accessToken);
           clips.push({
-            dayKey,
+            dayKey: job.dayKey,
             blob,
-            startSeconds: selection.startSeconds,
+            startSeconds: job.startSeconds,
+            kind: job.item.type === "PHOTO" ? ("photo" as const) : ("video" as const),
           });
         }
 

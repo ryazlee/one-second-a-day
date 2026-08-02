@@ -2,28 +2,32 @@ import { useQuery } from "@tanstack/react-query";
 import { listPickerMediaItems } from "@/src/lib/googleClient";
 import { MediaItem } from "@/src/types/types";
 
-export const EMPTY_VIDEOS: MediaItem[] = [];
+export const EMPTY_MEDIA: MediaItem[] = [];
 
-async function fetchVideos(
+async function fetchMediaItems(
   accessToken: string,
   sessionId: string
 ): Promise<MediaItem[]> {
   const data = await listPickerMediaItems(accessToken, sessionId);
-  const videos = (data.mediaItems || []).filter(
-    (item: MediaItem) => item?.type === "VIDEO" && item?.id && item?.mediaFile?.baseUrl
+  return (data.mediaItems || []).filter(
+    (item: MediaItem) =>
+      (item?.type === "VIDEO" || item?.type === "PHOTO") &&
+      item?.id &&
+      item?.mediaFile?.baseUrl
   );
-  return videos;
 }
+
+/** @deprecated Prefer EMPTY_MEDIA — kept for any lingering imports. */
+export const EMPTY_VIDEOS = EMPTY_MEDIA;
 
 export function useVideos(
   accessToken: string | null,
   sessionId: string | null
 ) {
   return useQuery({
-    queryKey: ["videos", sessionId],
-    queryFn: () => fetchVideos(accessToken!, sessionId!),
+    queryKey: ["media", sessionId],
+    queryFn: () => fetchMediaItems(accessToken!, sessionId!),
     enabled: Boolean(accessToken && sessionId),
-    // Picker session results are immutable once set.
     staleTime: Infinity,
     gcTime: 1000 * 60 * 30,
     refetchOnWindowFocus: false,
