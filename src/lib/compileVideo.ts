@@ -185,6 +185,22 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function pauseRecorder(recorder: MediaRecorder) {
+  try {
+    if (recorder.state === "recording") recorder.pause();
+  } catch {
+    // ignore
+  }
+}
+
+function resumeRecorder(recorder: MediaRecorder) {
+  try {
+    if (recorder.state === "paused") recorder.resume();
+  } catch {
+    // ignore
+  }
+}
+
 async function playWithTimeout(
   video: HTMLVideoElement,
   ms: number
@@ -198,6 +214,53 @@ async function playWithTimeout(
   } catch {
     return false;
   }
+}
+
+/** Record exactly `CLIP_DURATION` of wall-clock while the source plays at 1x. */
+async function capturePlayingClip(
+  ctx: CanvasRenderingContext2D,
+  video: HTMLVideoElement,
+  end: number,
+  stamp: string | null
+): Promise<void> {
+  await new Promise<void>((resolve) => {
+    let raf = 0;
+    let settled = false;
+    const startedAt = performance.now();
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(hardStop);
+      cancelAnimationFrame(raf);
+      try {
+        video.pause();
+      } catch {
+        // ignore
+      }
+      drawFrame(ctx, video, stamp);
+      resolve();
+    };
+
+    const tick = () => {
+      drawFrame(ctx, video, stamp);
+      const elapsed = performance.now() - startedAt;
+      if (
+        elapsed >= CLIP_DURATION * 1000 ||
+        video.ended ||
+        video.paused ||
+        video.currentTime >= end - 0.01
+      ) {
+        finish();
+        return;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+
+    raf = requestAnimationFrame(tick);
+    // Hard cap at exactly one second — no padding that stretches pacing.
+    const hardStop = window.setTimeout(finish, CLIP_DURATION * 1000);
+  });
 }
 
 function disposeVideo(video: HTMLVideoElement) {
@@ -345,12 +408,16 @@ async function renderClipStillHold(
 /**
  * Mobile-safe clip render with a hard per-clip deadline so one bad file
  * can't stall the whole export.
+ *
+ * MediaRecorder stays paused during seek/play setup so load stalls aren't
+ * baked in as slow-mo. Only the real 1s of 1x playback is recorded.
  */
 async function renderClipMobile(
   ctx: CanvasRenderingContext2D,
   video: HTMLVideoElement,
   startSeconds: number,
-  stamp: string | null
+  stamp: string | null,
+  recorder: MediaRecorder
 ): Promise<void> {
   const maxStart = Math.max(0, (video.duration || CLIP_DURATION) - CLIP_DURATION);
   const start = Math.min(Math.max(0, startSeconds), maxStart);
@@ -358,47 +425,22 @@ async function renderClipMobile(
 
   video.muted = true;
   video.defaultMuted = true;
+  video.playbackRate = 1;
 
   const run = async () => {
+    pauseRecorder(recorder);
     await seekVideo(video, start);
     drawFrame(ctx, video, stamp);
 
     const playing = await playWithTimeout(video, 800);
     if (!playing) {
+      resumeRecorder(recorder);
       await renderClipStillHold(ctx, video, stamp);
       return;
     }
 
-    await new Promise<void>((resolve) => {
-      let raf = 0;
-      let settled = false;
-
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(hardStop);
-        cancelAnimationFrame(raf);
-        try {
-          video.pause();
-        } catch {
-          // ignore
-        }
-        drawFrame(ctx, video, stamp);
-        resolve();
-      };
-
-      const tick = () => {
-        drawFrame(ctx, video, stamp);
-        if (video.ended || video.paused || video.currentTime >= end - 0.01) {
-          finish();
-          return;
-        }
-        raf = requestAnimationFrame(tick);
-      };
-
-      raf = requestAnimationFrame(tick);
-      const hardStop = window.setTimeout(finish, CLIP_DURATION * 1000 + 300);
-    });
+    resumeRecorder(recorder);
+    await capturePlayingClip(ctx, video, end, stamp);
   };
 
   try {
@@ -414,8 +456,12 @@ async function renderClipMobile(
     } catch {
       // ignore
     }
+    pauseRecorder(recorder);
     drawFrame(ctx, video, stamp);
+    resumeRecorder(recorder);
     await renderClipStillHold(ctx, video, stamp);
+  } finally {
+    pauseRecorder(recorder);
   }
 }
 
@@ -442,20 +488,24 @@ async function renderMissingClip(
 }
 
 /**
- * Play the source in real time and paint every animation frame.
- * Used on desktop; mobile uses a timeout-guarded path instead.
+ * Play the source at 1x and paint every animation frame.
+ * Recorder is paused during seek/play setup so only real playback is recorded.
  */
 async function renderClipRealtime(
   ctx: CanvasRenderingContext2D,
   video: HTMLVideoElement,
   startSeconds: number,
   stamp: string | null,
-  audioDest: MediaStreamAudioDestinationNode | null
+  audioDest: MediaStreamAudioDestinationNode | null,
+  recorder: MediaRecorder
 ): Promise<void> {
   const maxStart = Math.max(0, (video.duration || CLIP_DURATION) - CLIP_DURATION);
   const start = Math.min(Math.max(0, startSeconds), maxStart);
   const end = start + CLIP_DURATION;
 
+  video.playbackRate = 1;
+
+  pauseRecorder(recorder);
   await seekVideo(video, start);
   drawFrame(ctx, video, stamp);
 
@@ -477,7 +527,9 @@ async function renderClipRealtime(
   const playing = await playWithTimeout(video, 2000);
   if (!playing) {
     video.muted = true;
+    resumeRecorder(recorder);
     await renderClipStillHold(ctx, video, stamp);
+    pauseRecorder(recorder);
     if (source) {
       try {
         source.disconnect();
@@ -488,39 +540,9 @@ async function renderClipRealtime(
     return;
   }
 
-  await new Promise<void>((resolve) => {
-    let raf = 0;
-    let settled = false;
-
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(hardStop);
-      cancelAnimationFrame(raf);
-      try {
-        video.pause();
-      } catch {
-        // ignore
-      }
-      drawFrame(ctx, video, stamp);
-      resolve();
-    };
-
-    const tick = () => {
-      drawFrame(ctx, video, stamp);
-
-      if (video.ended || video.paused || video.currentTime >= end - 0.01) {
-        finish();
-        return;
-      }
-
-      raf = requestAnimationFrame(tick);
-    };
-
-    raf = requestAnimationFrame(tick);
-
-    const hardStop = window.setTimeout(finish, CLIP_DURATION * 1000 + 400);
-  });
+  resumeRecorder(recorder);
+  await capturePlayingClip(ctx, video, end, stamp);
+  pauseRecorder(recorder);
 
   if (source) {
     try {
@@ -536,14 +558,22 @@ async function renderVideoClip(
   video: HTMLVideoElement,
   startSeconds: number,
   stamp: string | null,
-  audioDest: MediaStreamAudioDestinationNode | null
+  audioDest: MediaStreamAudioDestinationNode | null,
+  recorder: MediaRecorder
 ): Promise<void> {
   if (isAppleTouchDevice()) {
-    await renderClipMobile(ctx, video, startSeconds, stamp);
+    await renderClipMobile(ctx, video, startSeconds, stamp, recorder);
     return;
   }
 
-  await renderClipRealtime(ctx, video, startSeconds, stamp, audioDest);
+  await renderClipRealtime(
+    ctx,
+    video,
+    startSeconds,
+    stamp,
+    audioDest,
+    recorder
+  );
 }
 
 export async function compileOneSecondVideo({
@@ -643,6 +673,8 @@ export async function compileOneSecondVideo({
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, width, height);
   recorder.start(250);
+  // Stay paused while loading/seeking so setup time isn't baked into playback speed.
+  pauseRecorder(recorder);
 
   for (let i = 0; i < clips.length; i++) {
     const clip = clips[i];
@@ -656,7 +688,9 @@ export async function compileOneSecondVideo({
     try {
       if (clip.kind === "photo") {
         const image = await loadImage(clip.blob);
+        resumeRecorder(recorder);
         await renderStillClip(ctx, image, stamp);
+        pauseRecorder(recorder);
       } else {
         const video = await loadVideo(clip.blob);
         try {
@@ -665,7 +699,8 @@ export async function compileOneSecondVideo({
             video,
             clip.startSeconds,
             stamp,
-            audioDest
+            audioDest,
+            recorder
           );
         } finally {
           disposeVideo(video);
@@ -677,7 +712,9 @@ export async function compileOneSecondVideo({
         (i + 0.5) / clips.length,
         `Skipping clip ${i + 1}…`
       );
+      resumeRecorder(recorder);
       await renderMissingClip(ctx, stamp);
+      pauseRecorder(recorder);
     }
 
     // Drop the downloaded bytes so iOS isn't holding 14 full videos at once.
@@ -687,11 +724,12 @@ export async function compileOneSecondVideo({
       // ignore
     }
 
-    // Give iOS a beat to release decoder resources between clips.
+    // Give iOS a beat to release decoder resources between clips (recorder paused).
     await wait(isAppleTouchDevice() ? 120 : 30);
   }
 
   onProgress?.(0.92, "Adding credit…");
+  resumeRecorder(recorder);
   await renderEndCard(ctx);
 
   onProgress?.(0.96, "Finishing export…");

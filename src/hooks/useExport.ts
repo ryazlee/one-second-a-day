@@ -2,20 +2,18 @@
 
 import { compileOneSecondVideo } from "@/src/lib/compileVideo";
 import { fetchVideoBlob } from "@/src/lib/fetchVideoBlob";
-import {
-  prefersShareSheet,
-  saveExportedVideo,
-} from "@/src/lib/saveExportedVideo";
+import { saveExportedVideo } from "@/src/lib/saveExportedVideo";
 import {
   DaySelection,
   ExportOrientation,
   MediaItem,
 } from "@/src/types/types";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 export type ReadyExport = {
   blob: Blob;
   filename: string;
+  url: string;
 };
 
 export function useExport() {
@@ -25,12 +23,16 @@ export function useExport() {
   const [error, setError] = useState<string | null>(null);
   const [readyExport, setReadyExport] = useState<ReadyExport | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<string | null>(null);
 
-  useEffect(() => {
-    return () => {
-      // nothing to revoke — blob held in memory until dismissed
-    };
-  }, [readyExport]);
+  const clearReadyExport = useCallback(() => {
+    setReadyExport((current) => {
+      if (current?.url) URL.revokeObjectURL(current.url);
+      return null;
+    });
+    setSaveStatus(null);
+    setLabel("");
+  }, []);
 
   const exportVideo = useCallback(
     async ({
@@ -50,7 +52,11 @@ export function useExport() {
     }) => {
       setIsExporting(true);
       setError(null);
-      setReadyExport(null);
+      setSaveStatus(null);
+      setReadyExport((current) => {
+        if (current?.url) URL.revokeObjectURL(current.url);
+        return null;
+      });
       setProgress(0);
       setLabel("Downloading clips…");
 
@@ -111,20 +117,10 @@ export function useExport() {
 
         const stamp = new Date().toISOString().slice(0, 10);
         const filename = `one-second-a-day-${orientation}-${stamp}.${extension}`;
-        const ready = { blob, filename };
+        const url = URL.createObjectURL(blob);
 
-        // Desktop: download immediately (works without a second tap).
-        // Mobile: keep the file and wait for an explicit tap — iOS only allows
-        // the share sheet from a direct user gesture.
-        if (!prefersShareSheet()) {
-          setLabel("Downloading…");
-          await saveExportedVideo(blob, filename, { preferShare: false });
-          setLabel("Downloaded");
-          setReadyExport(ready);
-        } else {
-          setReadyExport(ready);
-          setLabel("Ready — tap Save to Photos");
-        }
+        setReadyExport({ blob, filename, url });
+        setLabel("Preview ready");
         setProgress(1);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Export failed");
@@ -135,7 +131,7 @@ export function useExport() {
     []
   );
 
-  const saveReadyExport = useCallback(async () => {
+  const shareReadyExport = useCallback(async () => {
     if (!readyExport || isSaving) return;
     setIsSaving(true);
     setError(null);
@@ -146,11 +142,11 @@ export function useExport() {
         { preferShare: true }
       );
       if (result === "shared") {
-        setLabel("Pick Save Video to add it to Camera Roll");
+        setSaveStatus("Choose Save Video in the share sheet for Camera Roll");
       } else if (result === "downloaded") {
-        setLabel("Downloaded");
+        setSaveStatus("Downloaded");
       } else {
-        setLabel("Save cancelled — tap Save to Photos to try again");
+        setSaveStatus("Cancelled — try again when you’re ready");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn’t save video");
@@ -159,10 +155,23 @@ export function useExport() {
     }
   }, [readyExport, isSaving]);
 
-  const clearReadyExport = useCallback(() => {
-    setReadyExport(null);
-    setLabel("");
-  }, []);
+  const downloadReadyExport = useCallback(async () => {
+    if (!readyExport || isSaving) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      const result = await saveExportedVideo(
+        readyExport.blob,
+        readyExport.filename,
+        { preferShare: false }
+      );
+      setSaveStatus(result === "downloaded" ? "Downloaded" : "Saved");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn’t download video");
+    } finally {
+      setIsSaving(false);
+    }
+  }, [readyExport, isSaving]);
 
   return {
     isExporting,
@@ -171,8 +180,10 @@ export function useExport() {
     label,
     error,
     readyExport,
+    saveStatus,
     exportVideo,
-    saveReadyExport,
+    shareReadyExport,
+    downloadReadyExport,
     clearReadyExport,
   };
 }

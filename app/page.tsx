@@ -2,6 +2,7 @@
 
 import { Button } from "@/src/components/Button";
 import { DayCard } from "@/src/components/DayCard";
+import { ExportPreviewModal } from "@/src/components/ExportPreviewModal";
 import { Landing } from "@/src/components/Landing";
 import { Page } from "@/src/components/Page";
 import { SectionCard } from "@/src/components/SectionCard";
@@ -56,8 +57,10 @@ export default function Home() {
     label,
     error,
     readyExport,
+    saveStatus,
     exportVideo,
-    saveReadyExport,
+    shareReadyExport,
+    downloadReadyExport,
     clearReadyExport,
   } = useExport();
 
@@ -242,26 +245,6 @@ export default function Home() {
               </div>
               <Button label="Exporting…" disabled />
             </>
-          ) : readyExport ? (
-            <>
-              <p className="sticky-action__meta">
-                {label || "Export ready"}
-              </p>
-              <div className="toolbar-row" style={{ width: "100%" }}>
-                <Button
-                  label={isSaving ? "Opening…" : "Save to Photos"}
-                  onClick={() => void saveReadyExport()}
-                  disabled={isSaving}
-                  className="sticky-action__primary"
-                />
-                <Button
-                  label="Done"
-                  variant="ghost"
-                  onClick={clearReadyExport}
-                  disabled={isSaving}
-                />
-              </div>
-            </>
           ) : (
             <>
               <p className="sticky-action__meta">
@@ -284,6 +267,17 @@ export default function Home() {
             </>
           )}
         </StickyActionBar>
+      ) : null}
+
+      {readyExport ? (
+        <ExportPreviewModal
+          exportFile={readyExport}
+          isSaving={isSaving}
+          status={saveStatus}
+          onShare={() => void shareReadyExport()}
+          onDownload={() => void downloadReadyExport()}
+          onClose={clearReadyExport}
+        />
       ) : null}
     </>
   );
