@@ -2,6 +2,7 @@
 
 import { compileOneSecondVideo } from "@/src/lib/compileVideo";
 import { fetchVideoBlob } from "@/src/lib/fetchVideoBlob";
+import { saveExportedVideo } from "@/src/lib/saveExportedVideo";
 import {
   DaySelection,
   ExportOrientation,
@@ -37,8 +38,11 @@ export function useExport() {
       setLabel("Downloading clips…");
 
       try {
-        const jobs: { dayKey: string; item: MediaItem; startSeconds: number }[] =
-          [];
+        const jobs: {
+          dayKey: string;
+          item: MediaItem;
+          startSeconds: number;
+        }[] = [];
 
         for (const dayKey of days) {
           const selection = selections[dayKey];
@@ -71,7 +75,10 @@ export function useExport() {
             dayKey: job.dayKey,
             blob,
             startSeconds: job.startSeconds,
-            kind: job.item.type === "PHOTO" ? ("photo" as const) : ("video" as const),
+            kind:
+              job.item.type === "PHOTO"
+                ? ("photo" as const)
+                : ("video" as const),
           });
         }
 
@@ -85,14 +92,19 @@ export function useExport() {
           },
         });
 
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
         const stamp = new Date().toISOString().slice(0, 10);
-        a.href = url;
-        a.download = `one-second-a-day-${orientation}-${stamp}.${extension}`;
-        a.click();
-        URL.revokeObjectURL(url);
-        setLabel("Downloaded");
+        const filename = `one-second-a-day-${orientation}-${stamp}.${extension}`;
+
+        setLabel("Saving…");
+        const result = await saveExportedVideo(blob, filename);
+
+        if (result === "shared") {
+          setLabel("Use Save Video in the share sheet for Camera Roll");
+        } else if (result === "downloaded") {
+          setLabel("Downloaded");
+        } else {
+          setLabel("Save cancelled");
+        }
         setProgress(1);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Export failed");

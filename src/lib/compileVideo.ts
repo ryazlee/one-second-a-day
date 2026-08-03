@@ -26,19 +26,46 @@ export function outputSizeForOrientation(orientation: ExportOrientation) {
   return orientation === "landscape" ? LANDSCAPE_SIZE : PORTRAIT_SIZE;
 }
 
+function isAppleTouchDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return (
+    /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+}
+
 function pickMimeType(): string {
-  const candidates = [
-    "video/webm;codecs=vp9,opus",
-    "video/webm;codecs=vp8,opus",
-    "video/webm",
-    "video/mp4",
-  ];
+  if (typeof MediaRecorder === "undefined") return "";
+
+  // Safari / iOS: MP4 (H.264). Chrome: WebM. Prefer what the engine actually supports.
+  const candidates = isAppleTouchDevice()
+    ? ["video/mp4", "video/mp4;codecs=avc1.42E01E,mp4a.40.2", "video/webm"]
+    : [
+        "video/webm;codecs=vp9,opus",
+        "video/webm;codecs=vp8,opus",
+        "video/webm",
+        "video/mp4",
+      ];
+
   for (const type of candidates) {
-    if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(type)) {
-      return type;
-    }
+    if (MediaRecorder.isTypeSupported(type)) return type;
   }
-  return "video/webm";
+  return "";
+}
+
+async function resumeAudioContext(audioCtx: AudioContext): Promise<boolean> {
+  if ((audioCtx.state as string) === "running") return true;
+  try {
+    await Promise.race([
+      audioCtx.resume(),
+      wait(400).then(() => {
+        throw new Error("AudioContext resume timed out");
+      }),
+    ]);
+  } catch {
+    return false;
+  }
+  return (audioCtx.state as string) === "running";
 }
 
 function loadVideo(blob: Blob): Promise<HTMLVideoElement> {
@@ -46,14 +73,25 @@ function loadVideo(blob: Blob): Promise<HTMLVideoElement> {
     const video = document.createElement("video");
     video.preload = "auto";
     video.muted = true;
+    video.defaultMuted = true;
     video.playsInline = true;
+    video.setAttribute("playsinline", "true");
+    video.setAttribute("webkit-playsinline", "true");
     video.crossOrigin = "anonymous";
-    video.src = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
+    video.src = url;
 
     const cleanup = () => {
       video.onloadeddata = null;
       video.onerror = null;
+      window.clearTimeout(timeout);
     };
+
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      URL.revokeObjectURL(url);
+      reject(new Error("Timed out loading video for export"));
+    }, 30_000);
 
     video.onloadeddata = () => {
       cleanup();
@@ -61,6 +99,7 @@ function loadVideo(blob: Blob): Promise<HTMLVideoElement> {
     };
     video.onerror = () => {
       cleanup();
+      URL.revokeObjectURL(url);
       reject(new Error("Failed to load video for export"));
     };
   });
@@ -217,12 +256,12 @@ async function renderClipRealtime(
   drawFrame(ctx, video, stamp);
 
   let source: MediaElementAudioSourceNode | null = null;
-  if (audioDest) {
+  if (audioDest && audioDest.context.state === "running") {
     try {
       video.muted = false;
       video.volume = 1;
-      const ctx = audioDest.context as AudioContext;
-      source = ctx.createMediaElementSource(video);
+      const audioContext = audioDest.context as AudioContext;
+      source = audioContext.createMediaElementSource(video);
       source.connect(audioDest);
     } catch {
       video.muted = true;
@@ -231,7 +270,13 @@ async function renderClipRealtime(
     video.muted = true;
   }
 
-  await video.play();
+  try {
+    await video.play();
+  } catch {
+    // iOS can reject play() after long async work; keep painting frames anyway.
+    video.muted = true;
+    await video.play().catch(() => undefined);
+  }
 
   await new Promise<void>((resolve) => {
     let raf = 0;
@@ -284,7 +329,11 @@ export async function compileOneSecondVideo({
 
   onProgress?.(0.02, "Preparing…");
 
-  const { width, height } = outputSizeForOrientation(orientation);
+  // Full HD realtime encode is heavy on phones; slightly smaller is much more reliable.
+  const full = outputSizeForOrientation(orientation);
+  const scale = isAppleTouchDevice() ? 0.6667 : 1;
+  const width = Math.round(full.width * scale / 2) * 2;
+  const height = Math.round(full.height * scale / 2) * 2;
 
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -292,14 +341,28 @@ export async function compileOneSecondVideo({
   const ctx = canvas.getContext("2d", { alpha: false });
   if (!ctx) throw new Error("Canvas unsupported");
 
+  onProgress?.(0.04, "Starting recorder…");
+
   const canvasStream = canvas.captureStream(OUTPUT_FPS);
 
   let audioCtx: AudioContext | null = null;
   let audioDest: MediaStreamAudioDestinationNode | null = null;
+  // After the download await we're outside the user-gesture window. iOS often
+  // leaves AudioContext suspended forever — never block export on resume.
   try {
-    audioCtx = new AudioContext();
-    if (audioCtx.state === "suspended") await audioCtx.resume();
-    audioDest = audioCtx.createMediaStreamDestination();
+    const AC =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext })
+        .webkitAudioContext;
+    audioCtx = new AC();
+    const running = await resumeAudioContext(audioCtx);
+    if (running) {
+      audioDest = audioCtx.createMediaStreamDestination();
+    } else {
+      await audioCtx.close().catch(() => undefined);
+      audioCtx = null;
+      audioDest = null;
+    }
   } catch {
     audioCtx = null;
     audioDest = null;
@@ -312,25 +375,42 @@ export async function compileOneSecondVideo({
   const combined = new MediaStream(tracks);
 
   const mimeType = pickMimeType();
-  const recorder = new MediaRecorder(combined, {
-    mimeType,
-    videoBitsPerSecond: 12_000_000,
-    audioBitsPerSecond: 192_000,
-  });
+  let recorder: MediaRecorder;
+  try {
+    recorder = mimeType
+      ? new MediaRecorder(combined, {
+          mimeType,
+          videoBitsPerSecond: isAppleTouchDevice() ? 6_000_000 : 12_000_000,
+        })
+      : new MediaRecorder(combined);
+  } catch {
+    // Retry video-only — some mobile engines reject audio+canvas combos.
+    const videoOnly = new MediaStream(canvasStream.getVideoTracks());
+    recorder = mimeType
+      ? new MediaRecorder(videoOnly, { mimeType })
+      : new MediaRecorder(videoOnly);
+    if (audioCtx) {
+      await audioCtx.close().catch(() => undefined);
+      audioCtx = null;
+      audioDest = null;
+    }
+  }
 
   const chunks: BlobPart[] = [];
   recorder.ondataavailable = (event) => {
     if (event.data.size > 0) chunks.push(event.data);
   };
 
+  const recordedType = recorder.mimeType || mimeType || "video/mp4";
+
   const stopped = new Promise<Blob>((resolve, reject) => {
     recorder.onerror = () => reject(new Error("Recording failed"));
-    recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
+    recorder.onstop = () => resolve(new Blob(chunks, { type: recordedType }));
   });
 
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, width, height);
-  recorder.start(50);
+  recorder.start(250);
 
   for (let i = 0; i < clips.length; i++) {
     const clip = clips[i];
@@ -349,7 +429,6 @@ export async function compileOneSecondVideo({
       await renderClipRealtime(ctx, video, clip.startSeconds, stamp, audioDest);
       URL.revokeObjectURL(video.src);
     }
-    // Tiny hold so clip boundaries don't glitch.
     await wait(30);
   }
 
@@ -357,24 +436,38 @@ export async function compileOneSecondVideo({
   await renderEndCard(ctx);
 
   onProgress?.(0.96, "Finishing export…");
-  await wait(150);
+  await wait(200);
   recorder.stop();
   canvasStream.getTracks().forEach((track) => track.stop());
 
   const blob = await stopped;
   if (audioCtx) await audioCtx.close().catch(() => undefined);
 
-  if (blob.type.includes("mp4")) {
+  if (blob.size === 0) {
+    throw new Error("Export produced an empty video — try fewer clips");
+  }
+
+  if (blob.type.includes("mp4") || recordedType.includes("mp4")) {
     onProgress?.(1, "Done");
-    return { blob, extension: "mp4" };
+    return {
+      blob: blob.type.includes("mp4")
+        ? blob
+        : new Blob([blob], { type: "video/mp4" }),
+      extension: "mp4",
+    };
   }
 
   onProgress?.(0.97, "Converting to MP4…");
-  const { convertBlobToMp4 } = await import("@/src/lib/convertToMp4");
-  const mp4 = await convertBlobToMp4(blob, (ratio, label) => {
-    onProgress?.(0.97 + ratio * 0.03, label);
-  });
-
-  onProgress?.(1, "Done");
-  return { blob: mp4, extension: "mp4" };
+  try {
+    const { convertBlobToMp4 } = await import("@/src/lib/convertToMp4");
+    const mp4 = await convertBlobToMp4(blob, (ratio, label) => {
+      onProgress?.(0.97 + ratio * 0.03, label);
+    });
+    onProgress?.(1, "Done");
+    return { blob: mp4, extension: "mp4" };
+  } catch {
+    // Mobile WebM→MP4 via ffmpeg.wasm often fails; share the recorded blob anyway.
+    onProgress?.(1, "Done");
+    return { blob, extension: blob.type.includes("webm") ? "webm" : "mp4" };
+  }
 }
