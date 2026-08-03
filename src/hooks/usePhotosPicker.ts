@@ -52,7 +52,7 @@ function withAutoclose(pickerUri: string): string {
 }
 
 /** True if we got a real separate browsing context (not this tab). */
-function isSeparateWindow(popup: Window | null): popup is Window {
+function isSeparateWindow(popup: Window | null): boolean {
   return Boolean(popup && !popup.closed && popup !== window);
 }
 
@@ -124,7 +124,7 @@ export function usePhotosPicker(accessToken: string | null): PickerSession {
       const { pickerUri, id } = await createPickerSession(accessToken);
       beginPolling(id, accessToken);
 
-      if (isSeparateWindow(popup)) {
+      if (isSeparateWindow(popup) && popup) {
         setOpenedInNewTab(true);
         popup.location.href = withAutoclose(pickerUri);
         popup.focus();
@@ -134,7 +134,7 @@ export function usePhotosPicker(accessToken: string | null): PickerSession {
       // Popup blocked / same-tab hijack: navigate this tab. No /autoclose
       // (that would close the only tab). User returns with Back.
       setOpenedInNewTab(false);
-      if (popup && !popup.closed) {
+      if (popup && popup !== window && !popup.closed) {
         try {
           popup.close();
         } catch {
@@ -144,7 +144,7 @@ export function usePhotosPicker(accessToken: string | null): PickerSession {
       window.location.assign(pickerUri);
     } catch (error) {
       setOpenedInNewTab(false);
-      if (isSeparateWindow(popup)) popup.close();
+      if (isSeparateWindow(popup) && popup) popup.close();
       throw error;
     }
   }, [accessToken, beginPolling]);
