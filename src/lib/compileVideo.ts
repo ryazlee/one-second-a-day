@@ -83,55 +83,108 @@ function loadVideo(blob: Blob): Promise<HTMLVideoElement> {
 
     const cleanup = () => {
       video.onloadeddata = null;
+      video.onloadedmetadata = null;
       video.onerror = null;
       window.clearTimeout(timeout);
+    };
+
+    const finish = () => {
+      cleanup();
+      resolve(video);
     };
 
     const timeout = window.setTimeout(() => {
       cleanup();
       URL.revokeObjectURL(url);
       reject(new Error("Timed out loading video for export"));
-    }, 30_000);
+    }, 20_000);
 
-    video.onloadeddata = () => {
-      cleanup();
-      resolve(video);
+    video.onloadeddata = finish;
+    video.onloadedmetadata = () => {
+      if (video.readyState >= 2) finish();
     };
     video.onerror = () => {
       cleanup();
       URL.revokeObjectURL(url);
       reject(new Error("Failed to load video for export"));
     };
+
+    try {
+      video.load();
+    } catch {
+      // ignore
+    }
   });
 }
 
 async function seekVideo(video: HTMLVideoElement, time: number): Promise<void> {
+  if (!Number.isFinite(video.duration) || video.duration <= 0) return;
+
   const target = Math.min(
     Math.max(0, time),
-    Math.max(0, (video.duration || 0) - 0.001)
+    Math.max(0, video.duration - 0.05)
   );
 
-  if (Math.abs(video.currentTime - target) < 0.01) return;
+  if (Math.abs(video.currentTime - target) < 0.04) return;
 
-  await new Promise<void>((resolve, reject) => {
-    const onSeeked = () => {
-      video.removeEventListener("seeked", onSeeked);
-      video.removeEventListener("error", onError);
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      video.removeEventListener("seeked", finish);
+      video.removeEventListener("error", finish);
       resolve();
     };
-    const onError = () => {
-      video.removeEventListener("seeked", onSeeked);
-      video.removeEventListener("error", onError);
-      reject(new Error("Seek failed"));
-    };
-    video.addEventListener("seeked", onSeeked);
-    video.addEventListener("error", onError);
-    video.currentTime = target;
+
+    // iOS often never fires seeked for blob URLs — never block the export.
+    const timeout = window.setTimeout(finish, 1500);
+    video.addEventListener("seeked", finish);
+    video.addEventListener("error", finish);
+    try {
+      video.currentTime = target;
+    } catch {
+      finish();
+    }
   });
 }
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function playWithTimeout(
+  video: HTMLVideoElement,
+  ms: number
+): Promise<boolean> {
+  try {
+    await Promise.race([
+      video.play().then(() => true),
+      wait(ms).then(() => false),
+    ]);
+    return !video.paused;
+  } catch {
+    return false;
+  }
+}
+
+function disposeVideo(video: HTMLVideoElement) {
+  try {
+    video.pause();
+  } catch {
+    // ignore
+  }
+  const src = video.src;
+  try {
+    video.removeAttribute("src");
+    video.load();
+  } catch {
+    // ignore
+  }
+  if (src && src.startsWith("blob:")) {
+    URL.revokeObjectURL(src);
+  }
 }
 
 function drawEndCard(ctx: CanvasRenderingContext2D) {
@@ -238,8 +291,81 @@ async function renderStillClip(
 }
 
 /**
+ * Hold a single frame for 1s — reliable fallback when play/seek is flaky on iOS.
+ */
+async function renderClipStillHold(
+  ctx: CanvasRenderingContext2D,
+  video: HTMLVideoElement,
+  stamp: string | null
+): Promise<void> {
+  const frameMs = 1000 / OUTPUT_FPS;
+  const frames = CLIP_DURATION * OUTPUT_FPS;
+  for (let i = 0; i < frames; i++) {
+    drawFrame(ctx, video, stamp);
+    await wait(frameMs);
+  }
+}
+
+/**
+ * Mobile-safe clip render: one seek, timed play, still-hold fallback.
+ * Avoids unbounded seek/play awaits that hang after the first clip on iOS.
+ */
+async function renderClipMobile(
+  ctx: CanvasRenderingContext2D,
+  video: HTMLVideoElement,
+  startSeconds: number,
+  stamp: string | null
+): Promise<void> {
+  const maxStart = Math.max(0, (video.duration || CLIP_DURATION) - CLIP_DURATION);
+  const start = Math.min(Math.max(0, startSeconds), maxStart);
+  const end = start + CLIP_DURATION;
+
+  video.muted = true;
+  video.defaultMuted = true;
+  await seekVideo(video, start);
+  drawFrame(ctx, video, stamp);
+
+  const playing = await playWithTimeout(video, 1500);
+  if (!playing) {
+    await renderClipStillHold(ctx, video, stamp);
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    let raf = 0;
+    let settled = false;
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(hardStop);
+      cancelAnimationFrame(raf);
+      try {
+        video.pause();
+      } catch {
+        // ignore
+      }
+      drawFrame(ctx, video, stamp);
+      resolve();
+    };
+
+    const tick = () => {
+      drawFrame(ctx, video, stamp);
+      if (video.ended || video.paused || video.currentTime >= end - 0.01) {
+        finish();
+        return;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+
+    raf = requestAnimationFrame(tick);
+    const hardStop = window.setTimeout(finish, CLIP_DURATION * 1000 + 400);
+  });
+}
+
+/**
  * Play the source in real time and paint every animation frame.
- * Much smoother than seeking frame-by-frame.
+ * Used on desktop; mobile uses a timeout-guarded path instead.
  */
 async function renderClipRealtime(
   ctx: CanvasRenderingContext2D,
@@ -256,7 +382,7 @@ async function renderClipRealtime(
   drawFrame(ctx, video, stamp);
 
   let source: MediaElementAudioSourceNode | null = null;
-  if (audioDest && audioDest.context.state === "running") {
+  if (audioDest && (audioDest.context.state as string) === "running") {
     try {
       video.muted = false;
       video.volume = 1;
@@ -270,12 +396,18 @@ async function renderClipRealtime(
     video.muted = true;
   }
 
-  try {
-    await video.play();
-  } catch {
-    // iOS can reject play() after long async work; keep painting frames anyway.
+  const playing = await playWithTimeout(video, 2000);
+  if (!playing) {
     video.muted = true;
-    await video.play().catch(() => undefined);
+    await renderClipStillHold(ctx, video, stamp);
+    if (source) {
+      try {
+        source.disconnect();
+      } catch {
+        // ignore
+      }
+    }
+    return;
   }
 
   await new Promise<void>((resolve) => {
@@ -287,7 +419,11 @@ async function renderClipRealtime(
       settled = true;
       window.clearTimeout(hardStop);
       cancelAnimationFrame(raf);
-      video.pause();
+      try {
+        video.pause();
+      } catch {
+        // ignore
+      }
       drawFrame(ctx, video, stamp);
       resolve();
     };
@@ -305,7 +441,7 @@ async function renderClipRealtime(
 
     raf = requestAnimationFrame(tick);
 
-    const hardStop = window.setTimeout(finish, CLIP_DURATION * 1000 + 200);
+    const hardStop = window.setTimeout(finish, CLIP_DURATION * 1000 + 400);
   });
 
   if (source) {
@@ -315,6 +451,21 @@ async function renderClipRealtime(
       // ignore
     }
   }
+}
+
+async function renderVideoClip(
+  ctx: CanvasRenderingContext2D,
+  video: HTMLVideoElement,
+  startSeconds: number,
+  stamp: string | null,
+  audioDest: MediaStreamAudioDestinationNode | null
+): Promise<void> {
+  if (isAppleTouchDevice()) {
+    await renderClipMobile(ctx, video, startSeconds, stamp);
+    return;
+  }
+
+  await renderClipRealtime(ctx, video, startSeconds, stamp, audioDest);
 }
 
 export async function compileOneSecondVideo({
@@ -349,23 +500,26 @@ export async function compileOneSecondVideo({
   let audioDest: MediaStreamAudioDestinationNode | null = null;
   // After the download await we're outside the user-gesture window. iOS often
   // leaves AudioContext suspended forever — never block export on resume.
-  try {
-    const AC =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext })
-        .webkitAudioContext;
-    audioCtx = new AC();
-    const running = await resumeAudioContext(audioCtx);
-    if (running) {
-      audioDest = audioCtx.createMediaStreamDestination();
-    } else {
-      await audioCtx.close().catch(() => undefined);
+  // Skip audio entirely on iPhone/iPad: MediaElementSource + multi-clip hangs.
+  if (!isAppleTouchDevice()) {
+    try {
+      const AC =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext })
+          .webkitAudioContext;
+      audioCtx = new AC();
+      const running = await resumeAudioContext(audioCtx);
+      if (running) {
+        audioDest = audioCtx.createMediaStreamDestination();
+      } else {
+        await audioCtx.close().catch(() => undefined);
+        audioCtx = null;
+        audioDest = null;
+      }
+    } catch {
       audioCtx = null;
       audioDest = null;
     }
-  } catch {
-    audioCtx = null;
-    audioDest = null;
   }
 
   const tracks = [
@@ -426,8 +580,17 @@ export async function compileOneSecondVideo({
       await renderStillClip(ctx, image, stamp);
     } else {
       const video = await loadVideo(clip.blob);
-      await renderClipRealtime(ctx, video, clip.startSeconds, stamp, audioDest);
-      URL.revokeObjectURL(video.src);
+      try {
+        await renderVideoClip(
+          ctx,
+          video,
+          clip.startSeconds,
+          stamp,
+          audioDest
+        );
+      } finally {
+        disposeVideo(video);
+      }
     }
     await wait(30);
   }
