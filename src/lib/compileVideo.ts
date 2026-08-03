@@ -78,42 +78,73 @@ function loadVideo(blob: Blob): Promise<HTMLVideoElement> {
     video.setAttribute("playsinline", "true");
     video.setAttribute("webkit-playsinline", "true");
     video.crossOrigin = "anonymous";
+    // iOS often won't decode detached videos — keep a 1×1 node in the DOM.
+    video.setAttribute(
+      "style",
+      "position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1"
+    );
+    document.body.appendChild(video);
+
     const url = URL.createObjectURL(blob);
     video.src = url;
 
-    const cleanup = () => {
+    let settled = false;
+    const cleanupListeners = () => {
+      window.clearTimeout(timeout);
       video.onloadeddata = null;
       video.onloadedmetadata = null;
+      video.oncanplay = null;
       video.onerror = null;
-      window.clearTimeout(timeout);
     };
 
-    const finish = () => {
-      cleanup();
+    const succeed = () => {
+      if (settled) return;
+      settled = true;
+      cleanupListeners();
       resolve(video);
     };
 
-    const timeout = window.setTimeout(() => {
-      cleanup();
+    const fail = (message: string) => {
+      if (settled) return;
+      settled = true;
+      cleanupListeners();
+      try {
+        video.remove();
+      } catch {
+        // ignore
+      }
       URL.revokeObjectURL(url);
-      reject(new Error("Timed out loading video for export"));
-    }, 20_000);
+      reject(new Error(message));
+    };
 
-    video.onloadeddata = finish;
-    video.onloadedmetadata = () => {
-      if (video.readyState >= 2) finish();
+    const timeout = window.setTimeout(
+      () => fail("Timed out loading video for export"),
+      isAppleTouchDevice() ? 8_000 : 20_000
+    );
+
+    const maybeReady = () => {
+      if (video.readyState >= 2 || video.videoWidth > 0) succeed();
     };
-    video.onerror = () => {
-      cleanup();
-      URL.revokeObjectURL(url);
-      reject(new Error("Failed to load video for export"));
-    };
+
+    video.onloadedmetadata = maybeReady;
+    video.onloadeddata = maybeReady;
+    video.oncanplay = maybeReady;
+    video.onerror = () => fail("Failed to load video for export");
 
     try {
       video.load();
     } catch {
       // ignore
     }
+
+    // Nudge the decoder — required on some iOS versions for blob URLs.
+    void video
+      .play()
+      .then(() => {
+        video.pause();
+        maybeReady();
+      })
+      .catch(() => maybeReady());
   });
 }
 
@@ -179,6 +210,11 @@ function disposeVideo(video: HTMLVideoElement) {
   try {
     video.removeAttribute("src");
     video.load();
+  } catch {
+    // ignore
+  }
+  try {
+    video.remove();
   } catch {
     // ignore
   }
@@ -307,8 +343,8 @@ async function renderClipStillHold(
 }
 
 /**
- * Mobile-safe clip render: one seek, timed play, still-hold fallback.
- * Avoids unbounded seek/play awaits that hang after the first clip on iOS.
+ * Mobile-safe clip render with a hard per-clip deadline so one bad file
+ * can't stall the whole export.
  */
 async function renderClipMobile(
   ctx: CanvasRenderingContext2D,
@@ -322,45 +358,87 @@ async function renderClipMobile(
 
   video.muted = true;
   video.defaultMuted = true;
-  await seekVideo(video, start);
-  drawFrame(ctx, video, stamp);
 
-  const playing = await playWithTimeout(video, 1500);
-  if (!playing) {
-    await renderClipStillHold(ctx, video, stamp);
-    return;
-  }
+  const run = async () => {
+    await seekVideo(video, start);
+    drawFrame(ctx, video, stamp);
 
-  await new Promise<void>((resolve) => {
-    let raf = 0;
-    let settled = false;
+    const playing = await playWithTimeout(video, 800);
+    if (!playing) {
+      await renderClipStillHold(ctx, video, stamp);
+      return;
+    }
 
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(hardStop);
-      cancelAnimationFrame(raf);
-      try {
-        video.pause();
-      } catch {
-        // ignore
-      }
-      drawFrame(ctx, video, stamp);
-      resolve();
-    };
+    await new Promise<void>((resolve) => {
+      let raf = 0;
+      let settled = false;
 
-    const tick = () => {
-      drawFrame(ctx, video, stamp);
-      if (video.ended || video.paused || video.currentTime >= end - 0.01) {
-        finish();
-        return;
-      }
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(hardStop);
+        cancelAnimationFrame(raf);
+        try {
+          video.pause();
+        } catch {
+          // ignore
+        }
+        drawFrame(ctx, video, stamp);
+        resolve();
+      };
+
+      const tick = () => {
+        drawFrame(ctx, video, stamp);
+        if (video.ended || video.paused || video.currentTime >= end - 0.01) {
+          finish();
+          return;
+        }
+        raf = requestAnimationFrame(tick);
+      };
+
       raf = requestAnimationFrame(tick);
-    };
+      const hardStop = window.setTimeout(finish, CLIP_DURATION * 1000 + 300);
+    });
+  };
 
-    raf = requestAnimationFrame(tick);
-    const hardStop = window.setTimeout(finish, CLIP_DURATION * 1000 + 400);
-  });
+  try {
+    await Promise.race([
+      run(),
+      wait(3500).then(() => {
+        throw new Error("clip-deadline");
+      }),
+    ]);
+  } catch {
+    try {
+      video.pause();
+    } catch {
+      // ignore
+    }
+    drawFrame(ctx, video, stamp);
+    await renderClipStillHold(ctx, video, stamp);
+  }
+}
+
+async function renderMissingClip(
+  ctx: CanvasRenderingContext2D,
+  stamp: string | null
+): Promise<void> {
+  const frameMs = 1000 / OUTPUT_FPS;
+  const frames = CLIP_DURATION * OUTPUT_FPS;
+  for (let i = 0; i < frames; i++) {
+    const { width, height } = ctx.canvas;
+    ctx.fillStyle = "#0a0a0a";
+    ctx.fillRect(0, 0, width, height);
+    if (stamp) {
+      const fontSize = Math.round(Math.min(width, height) * 0.045);
+      ctx.font = `650 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#fff";
+      ctx.fillText(stamp, width / 2, height * 0.86);
+    }
+    await wait(frameMs);
+  }
 }
 
 /**
@@ -575,24 +653,42 @@ export async function compileOneSecondVideo({
 
     const stamp = showDateStamp ? formatStamp(clip.dayKey) : null;
 
-    if (clip.kind === "photo") {
-      const image = await loadImage(clip.blob);
-      await renderStillClip(ctx, image, stamp);
-    } else {
-      const video = await loadVideo(clip.blob);
-      try {
-        await renderVideoClip(
-          ctx,
-          video,
-          clip.startSeconds,
-          stamp,
-          audioDest
-        );
-      } finally {
-        disposeVideo(video);
+    try {
+      if (clip.kind === "photo") {
+        const image = await loadImage(clip.blob);
+        await renderStillClip(ctx, image, stamp);
+      } else {
+        const video = await loadVideo(clip.blob);
+        try {
+          await renderVideoClip(
+            ctx,
+            video,
+            clip.startSeconds,
+            stamp,
+            audioDest
+          );
+        } finally {
+          disposeVideo(video);
+        }
       }
+    } catch {
+      // Keep going — one unreadable Google clip shouldn't kill the export.
+      onProgress?.(
+        (i + 0.5) / clips.length,
+        `Skipping clip ${i + 1}…`
+      );
+      await renderMissingClip(ctx, stamp);
     }
-    await wait(30);
+
+    // Drop the downloaded bytes so iOS isn't holding 14 full videos at once.
+    try {
+      (clips[i] as { blob: Blob | null }).blob = null as unknown as Blob;
+    } catch {
+      // ignore
+    }
+
+    // Give iOS a beat to release decoder resources between clips.
+    await wait(isAppleTouchDevice() ? 120 : 30);
   }
 
   onProgress?.(0.92, "Adding credit…");
