@@ -706,7 +706,18 @@ export async function compileOneSecondVideo({
     throw new Error("Export produced an empty video — try fewer clips");
   }
 
-  if (blob.type.includes("mp4") || recordedType.includes("mp4")) {
+  const typeHint = `${blob.type} ${recordedType} ${mimeType}`.toLowerCase();
+  const looksMp4 = typeHint.includes("mp4") || typeHint.includes("avc1");
+  const looksWebm = typeHint.includes("webm");
+  const onPhone =
+    isAppleTouchDevice() ||
+    (typeof window !== "undefined" &&
+      window.matchMedia("(max-width: 768px)").matches);
+
+  // Safari records MP4 natively. Even when mime strings are empty/odd, prefer
+  // treating Apple recordings as MP4 and never run ffmpeg.wasm on phones —
+  // it hangs on "Encoding MP4…".
+  if (looksMp4 || (onPhone && !looksWebm)) {
     onProgress?.(1, "Done");
     return {
       blob: blob.type.includes("mp4")
@@ -716,17 +727,29 @@ export async function compileOneSecondVideo({
     };
   }
 
+  if (onPhone) {
+    onProgress?.(1, "Done");
+    return {
+      blob: looksWebm ? blob : new Blob([blob], { type: "video/mp4" }),
+      extension: looksWebm ? "webm" : "mp4",
+    };
+  }
+
   onProgress?.(0.97, "Converting to MP4…");
   try {
     const { convertBlobToMp4 } = await import("@/src/lib/convertToMp4");
-    const mp4 = await convertBlobToMp4(blob, (ratio, label) => {
-      onProgress?.(0.97 + ratio * 0.03, label);
-    });
+    const mp4 = await Promise.race([
+      convertBlobToMp4(blob, (ratio, label) => {
+        onProgress?.(0.97 + ratio * 0.03, label);
+      }),
+      wait(90_000).then(() => {
+        throw new Error("MP4 encode timed out");
+      }),
+    ]);
     onProgress?.(1, "Done");
     return { blob: mp4, extension: "mp4" };
   } catch {
-    // Mobile WebM→MP4 via ffmpeg.wasm often fails; share the recorded blob anyway.
     onProgress?.(1, "Done");
-    return { blob, extension: blob.type.includes("webm") ? "webm" : "mp4" };
+    return { blob, extension: looksWebm ? "webm" : "mp4" };
   }
 }
