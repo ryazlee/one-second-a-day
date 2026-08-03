@@ -25,7 +25,7 @@ export default function Home() {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [signingIn, setSigningIn] = useState(false);
 
-  const { sessionId, isReady, isPolling, openPicker, cancelPolling } =
+  const { sessionId, isReady, isPolling, openedInNewTab, openPicker, cancelPolling } =
     usePhotosPicker(accessToken);
 
   async function loginWithGoogle() {
@@ -98,7 +98,9 @@ export default function Home() {
                 {isPolling ? (
                   <div className="picker-wait">
                     <p className="muted">
-                      Finish in Google Photos, then return here.
+                      {openedInNewTab
+                        ? "Pick in the Google Photos tab — it closes when you’re done and this page loads your clips."
+                        : "Finish in Google Photos, then use Back to return here."}
                     </p>
                     <Button
                       label="Cancel"

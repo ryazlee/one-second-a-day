@@ -16,16 +16,10 @@ interface PickerSession {
   sessionId: string | null;
   isReady: boolean;
   isPolling: boolean;
+  /** True when Photos opened in another tab (autoclose can return the user). */
+  openedInNewTab: boolean;
   openPicker: () => Promise<void>;
   cancelPolling: () => void;
-}
-
-function isMobileViewport(): boolean {
-  if (typeof window === "undefined") return false;
-  return (
-    window.matchMedia("(max-width: 768px)").matches ||
-    /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-  );
 }
 
 function readPending(): PendingPicker | null {
@@ -34,7 +28,6 @@ function readPending(): PendingPicker | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PendingPicker;
     if (!parsed?.sessionId || !parsed?.accessToken) return null;
-    // Ignore sessions older than 2 hours.
     if (Date.now() - parsed.startedAt > 2 * 60 * 60 * 1000) {
       sessionStorage.removeItem(PENDING_PICKER_KEY);
       return null;
@@ -58,11 +51,17 @@ function withAutoclose(pickerUri: string): string {
   return trimmed.endsWith("/autoclose") ? trimmed : `${trimmed}/autoclose`;
 }
 
+/** True if we got a real separate browsing context (not this tab). */
+function isSeparateWindow(popup: Window | null): popup is Window {
+  return Boolean(popup && !popup.closed && popup !== window);
+}
+
 export function usePhotosPicker(accessToken: string | null): PickerSession {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [isPolling, setIsPolling] = useState(false);
   const [pollToken, setPollToken] = useState<string | null>(null);
+  const [openedInNewTab, setOpenedInNewTab] = useState(false);
   const readySessionRef = useRef<string | null>(null);
 
   const markReady = useCallback((id: string) => {
@@ -71,10 +70,10 @@ export function usePhotosPicker(accessToken: string | null): PickerSession {
     setSessionId(id);
     setIsPolling(false);
     setIsReady(true);
+    setOpenedInNewTab(false);
   }, []);
 
   const beginPolling = useCallback((id: string, token: string) => {
-    // Don't thrash ready→unready for a session we already finished.
     if (readySessionRef.current === id) {
       clearPending();
       setSessionId(id);
@@ -97,10 +96,10 @@ export function usePhotosPicker(accessToken: string | null): PickerSession {
   const cancelPolling = useCallback(() => {
     clearPending();
     setIsPolling(false);
-    // Keep isReady/sessionId if we already have a loaded selection.
+    setOpenedInNewTab(false);
   }, []);
 
-  // Resume a picker session after returning to this tab/page (mobile Back).
+  // Resume after returning via Back (same-tab fallback) or tab switch.
   useEffect(() => {
     if (!accessToken) return;
 
@@ -114,45 +113,38 @@ export function usePhotosPicker(accessToken: string | null): PickerSession {
   const openPicker = useCallback(async () => {
     if (!accessToken) return;
 
-    // New pick — allow a fresh session even if a prior one was ready.
     readySessionRef.current = null;
 
-    // Mobile: same-tab only. Google's picker can't run in an iframe, and
-    // window.open after an async call often opens a blank/extra tab while also
-    // leaving the app — which feels like "two pickers." Navigate away, pick,
-    // then use Back; session is persisted so we resume polling on return.
-    if (isMobileViewport()) {
-      const { pickerUri, id } = await createPickerSession(accessToken);
-      beginPolling(id, accessToken);
-      // No /autoclose — that would close the only tab. User returns via Back.
-      window.location.assign(pickerUri);
-      return;
-    }
-
-    // Desktop: open the popup synchronously in the click handler so blockers
-    // don't leave a blank window + force a second navigation. Then point it at
-    // the picker URI once the session exists (Google's recommended web flow).
-    const popup = window.open(
-      "about:blank",
-      "photos-picker",
-      "width=600,height=700"
-    );
+    // Open synchronously in the click gesture so mobile browsers allow a new
+    // tab. With /autoclose, that tab closes when picking finishes and the user
+    // lands back on this app tab (still polling).
+    const popup = window.open("about:blank", "photos-picker");
 
     try {
       const { pickerUri, id } = await createPickerSession(accessToken);
       beginPolling(id, accessToken);
-      const url = withAutoclose(pickerUri);
 
-      if (popup && !popup.closed) {
-        popup.location.href = url;
+      if (isSeparateWindow(popup)) {
+        setOpenedInNewTab(true);
+        popup.location.href = withAutoclose(pickerUri);
         popup.focus();
         return;
       }
 
-      // Popup blocked — stay in-app and open Photos in this tab as a last resort.
+      // Popup blocked / same-tab hijack: navigate this tab. No /autoclose
+      // (that would close the only tab). User returns with Back.
+      setOpenedInNewTab(false);
+      if (popup && !popup.closed) {
+        try {
+          popup.close();
+        } catch {
+          // ignore
+        }
+      }
       window.location.assign(pickerUri);
     } catch (error) {
-      if (popup && !popup.closed) popup.close();
+      setOpenedInNewTab(false);
+      if (isSeparateWindow(popup)) popup.close();
       throw error;
     }
   }, [accessToken, beginPolling]);
@@ -206,6 +198,7 @@ export function usePhotosPicker(accessToken: string | null): PickerSession {
     sessionId,
     isReady,
     isPolling,
+    openedInNewTab,
     openPicker,
     cancelPolling,
   };
