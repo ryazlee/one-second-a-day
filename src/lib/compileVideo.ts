@@ -706,50 +706,16 @@ export async function compileOneSecondVideo({
     throw new Error("Export produced an empty video — try fewer clips");
   }
 
+  // Use whatever MediaRecorder produced. Re-encoding with ffmpeg.wasm is too
+  // unreliable (hangs on "Encoding MP4…" in Chrome and on phones).
   const typeHint = `${blob.type} ${recordedType} ${mimeType}`.toLowerCase();
   const looksMp4 = typeHint.includes("mp4") || typeHint.includes("avc1");
-  const looksWebm = typeHint.includes("webm");
-  const onPhone =
-    isAppleTouchDevice() ||
-    (typeof window !== "undefined" &&
-      window.matchMedia("(max-width: 768px)").matches);
+  const extension = looksMp4 ? "mp4" : "webm";
+  const mime = looksMp4 ? "video/mp4" : "video/webm";
 
-  // Safari records MP4 natively. Even when mime strings are empty/odd, prefer
-  // treating Apple recordings as MP4 and never run ffmpeg.wasm on phones —
-  // it hangs on "Encoding MP4…".
-  if (looksMp4 || (onPhone && !looksWebm)) {
-    onProgress?.(1, "Done");
-    return {
-      blob: blob.type.includes("mp4")
-        ? blob
-        : new Blob([blob], { type: "video/mp4" }),
-      extension: "mp4",
-    };
-  }
-
-  if (onPhone) {
-    onProgress?.(1, "Done");
-    return {
-      blob: looksWebm ? blob : new Blob([blob], { type: "video/mp4" }),
-      extension: looksWebm ? "webm" : "mp4",
-    };
-  }
-
-  onProgress?.(0.97, "Converting to MP4…");
-  try {
-    const { convertBlobToMp4 } = await import("@/src/lib/convertToMp4");
-    const mp4 = await Promise.race([
-      convertBlobToMp4(blob, (ratio, label) => {
-        onProgress?.(0.97 + ratio * 0.03, label);
-      }),
-      wait(90_000).then(() => {
-        throw new Error("MP4 encode timed out");
-      }),
-    ]);
-    onProgress?.(1, "Done");
-    return { blob: mp4, extension: "mp4" };
-  } catch {
-    onProgress?.(1, "Done");
-    return { blob, extension: looksWebm ? "webm" : "mp4" };
-  }
+  onProgress?.(1, "Done");
+  return {
+    blob: blob.type === mime ? blob : new Blob([blob], { type: mime }),
+    extension,
+  };
 }
