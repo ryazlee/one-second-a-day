@@ -613,6 +613,15 @@ a {
   color: var(--text-secondary);
 }
 
+.sticky-action__primary {
+  flex: 1;
+  min-width: 0;
+}
+
+.sticky-action .toolbar-row {
+  width: 100%;
+}
+
 .progress-bar {
   width: 100%;
   height: 6px;

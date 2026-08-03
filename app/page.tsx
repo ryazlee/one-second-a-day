@@ -49,7 +49,17 @@ export default function Home() {
   const { days, selections, includedDays, includedClipCount, updateDay } =
     useDaySelections(mediaByDay, onePerDay);
 
-  const { isExporting, progress, label, error, exportVideo } = useExport();
+  const {
+    isExporting,
+    isSaving,
+    progress,
+    label,
+    error,
+    readyExport,
+    exportVideo,
+    saveReadyExport,
+    clearReadyExport,
+  } = useExport();
 
   const hasMedia = days.length > 0;
   const exportSeconds = includedClipCount + 1;
@@ -230,30 +240,49 @@ export default function Home() {
                   style={{ width: `${Math.round(progress * 100)}%` }}
                 />
               </div>
+              <Button label="Exporting…" disabled />
+            </>
+          ) : readyExport ? (
+            <>
+              <p className="sticky-action__meta">
+                {label || "Export ready"}
+              </p>
+              <div className="toolbar-row" style={{ width: "100%" }}>
+                <Button
+                  label={isSaving ? "Opening…" : "Save to Photos"}
+                  onClick={() => void saveReadyExport()}
+                  disabled={isSaving}
+                  className="sticky-action__primary"
+                />
+                <Button
+                  label="Done"
+                  variant="ghost"
+                  onClick={clearReadyExport}
+                  disabled={isSaving}
+                />
+              </div>
             </>
           ) : (
-            <p className="sticky-action__meta">
-              {includedClipCount}s + 1s credit · {orientation}
-            </p>
+            <>
+              <p className="sticky-action__meta">
+                {includedClipCount}s + 1s credit · {orientation}
+              </p>
+              <Button
+                label={`Export ${exportSeconds}s`}
+                disabled={includedClipCount === 0}
+                onClick={() =>
+                  exportVideo({
+                    days: includedDays,
+                    selections,
+                    videosByDay: mediaByDay,
+                    accessToken,
+                    showDateStamp,
+                    orientation,
+                  })
+                }
+              />
+            </>
           )}
-          <Button
-            label={
-              isExporting
-                ? "Exporting…"
-                : `Export ${exportSeconds}s`
-            }
-            disabled={isExporting || includedClipCount === 0}
-            onClick={() =>
-              exportVideo({
-                days: includedDays,
-                selections,
-                videosByDay: mediaByDay,
-                accessToken,
-                showDateStamp,
-                orientation,
-              })
-            }
-          />
         </StickyActionBar>
       ) : null}
     </>

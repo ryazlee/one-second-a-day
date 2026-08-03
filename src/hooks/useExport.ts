@@ -2,19 +2,35 @@
 
 import { compileOneSecondVideo } from "@/src/lib/compileVideo";
 import { fetchVideoBlob } from "@/src/lib/fetchVideoBlob";
-import { saveExportedVideo } from "@/src/lib/saveExportedVideo";
+import {
+  prefersShareSheet,
+  saveExportedVideo,
+} from "@/src/lib/saveExportedVideo";
 import {
   DaySelection,
   ExportOrientation,
   MediaItem,
 } from "@/src/types/types";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+
+export type ReadyExport = {
+  blob: Blob;
+  filename: string;
+};
 
 export function useExport() {
   const [isExporting, setIsExporting] = useState(false);
   const [progress, setProgress] = useState(0);
   const [label, setLabel] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [readyExport, setReadyExport] = useState<ReadyExport | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      // nothing to revoke — blob held in memory until dismissed
+    };
+  }, [readyExport]);
 
   const exportVideo = useCallback(
     async ({
@@ -34,6 +50,7 @@ export function useExport() {
     }) => {
       setIsExporting(true);
       setError(null);
+      setReadyExport(null);
       setProgress(0);
       setLabel("Downloading clips…");
 
@@ -94,16 +111,19 @@ export function useExport() {
 
         const stamp = new Date().toISOString().slice(0, 10);
         const filename = `one-second-a-day-${orientation}-${stamp}.${extension}`;
+        const ready = { blob, filename };
 
-        setLabel("Saving…");
-        const result = await saveExportedVideo(blob, filename);
-
-        if (result === "shared") {
-          setLabel("Use Save Video in the share sheet for Camera Roll");
-        } else if (result === "downloaded") {
+        // Desktop: download immediately (works without a second tap).
+        // Mobile: keep the file and wait for an explicit tap — iOS only allows
+        // the share sheet from a direct user gesture.
+        if (!prefersShareSheet()) {
+          setLabel("Downloading…");
+          await saveExportedVideo(blob, filename, { preferShare: false });
           setLabel("Downloaded");
+          setReadyExport(ready);
         } else {
-          setLabel("Save cancelled");
+          setReadyExport(ready);
+          setLabel("Ready — tap Save to Photos");
         }
         setProgress(1);
       } catch (err) {
@@ -115,11 +135,44 @@ export function useExport() {
     []
   );
 
+  const saveReadyExport = useCallback(async () => {
+    if (!readyExport || isSaving) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      const result = await saveExportedVideo(
+        readyExport.blob,
+        readyExport.filename,
+        { preferShare: true }
+      );
+      if (result === "shared") {
+        setLabel("Pick Save Video to add it to Camera Roll");
+      } else if (result === "downloaded") {
+        setLabel("Downloaded");
+      } else {
+        setLabel("Save cancelled — tap Save to Photos to try again");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn’t save video");
+    } finally {
+      setIsSaving(false);
+    }
+  }, [readyExport, isSaving]);
+
+  const clearReadyExport = useCallback(() => {
+    setReadyExport(null);
+    setLabel("");
+  }, []);
+
   return {
     isExporting,
+    isSaving,
     progress,
     label,
     error,
+    readyExport,
     exportVideo,
+    saveReadyExport,
+    clearReadyExport,
   };
 }
