@@ -4,8 +4,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy · 1 Second a Day",
-  description: "Privacy Policy for 1 Second a Day",
+  title: "Privacy Policy · One Second A Day",
+  description: "Privacy Policy for One Second A Day",
 };
 
 export default function PrivacyPage() {

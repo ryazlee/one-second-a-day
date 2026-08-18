@@ -2,6 +2,7 @@
 
 import { Button } from "@/src/components/Button";
 import { ThemeToggle } from "@/src/components/ThemeToggle";
+import { APP_NAME } from "@/src/content/app";
 import { useAccessToken } from "@/src/hooks/useAccessToken";
 import Link from "next/link";
 
@@ -13,7 +14,7 @@ export function AppHeader() {
       <div className="app-header-inner">
         <div className="brand-block">
           <Link href="/" className="brand">
-            1 Second a Day
+            {APP_NAME}
           </Link>
         </div>
         <div className="header-actions">

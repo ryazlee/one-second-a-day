@@ -12,7 +12,7 @@ export const privacySections: LegalSection[] = [
   {
     heading: "Overview",
     body: [
-      "1 Second a Day is a browser tool that helps you build a one-second-a-day video from clips you select in Google Photos. This policy explains what information is used when you visit the site and how it is handled.",
+      "One Second A Day is a browser tool that helps you build a one-second-a-day video from clips you select in Google Photos. This policy explains what information is used when you visit the site and how it is handled.",
     ],
   },
   {
@@ -97,7 +97,7 @@ export const termsSections: LegalSection[] = [
   {
     heading: "Agreement",
     body: [
-      "By using 1 Second a Day (“the Service”), you agree to these Terms of Service. If you do not agree, do not use the Service.",
+      "By using One Second A Day (“the Service”), you agree to these Terms of Service. If you do not agree, do not use the Service.",
     ],
   },
   {

@@ -791,7 +791,7 @@ a {
   text-align: center;
   gap: 1rem;
   padding: 2rem 0 1.5rem;
-  max-width: 28rem;
+  max-width: 36rem;
   margin: 0 auto;
 }
 
@@ -817,6 +817,37 @@ a {
   color: var(--text-secondary);
   line-height: 1.55;
   animation: landing-rise 0.55s ease 0.1s both;
+}
+
+.landing__purpose {
+  width: 100%;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.landing__purpose h2 {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.landing__purpose p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+  line-height: 1.55;
+}
+
+.landing__purpose a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .landing__steps {

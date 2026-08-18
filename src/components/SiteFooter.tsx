@@ -9,8 +9,8 @@ export function SiteFooter() {
           <Link href="/terms">Terms of Service</Link>
         </nav>
         <p className="site-footer-note">
-          Made for personal one-second-a-day compilations — processing stays in
-          your browser.
+          One Second A Day is a free browser tool for personal one-second-a-day
+          compilations. Processing stays on your device.
         </p>
       </div>
     </footer>

@@ -4,8 +4,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "Terms of Service · 1 Second a Day",
-  description: "Terms of Service for 1 Second a Day",
+  title: "Terms of Service · One Second A Day",
+  description: "Terms of Service for One Second A Day",
 };
 
 export default function TermsPage() {
