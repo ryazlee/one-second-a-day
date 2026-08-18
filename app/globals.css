@@ -544,6 +544,34 @@ a {
   text-align: center;
 }
 
+.video-loading--overlay {
+  position: absolute;
+  inset: auto 0 0;
+  height: auto;
+  padding: 0.4rem 0.6rem;
+  background: color-mix(in srgb, #000 55%, transparent);
+  font-size: 0.75rem;
+}
+
+.video-error {
+  gap: 0.65rem;
+}
+
+.video-error p {
+  margin: 0;
+}
+
+.video-error__retry {
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.4rem 0.85rem;
+  background: #fff;
+  color: #111;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
 .trim-controls {
   display: flex;
   flex-direction: column;

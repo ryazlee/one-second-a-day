@@ -1,4 +1,9 @@
+import { convertBlobToMp4 } from "@/src/lib/convertToMp4";
 import { formatStamp } from "@/src/lib/dates";
+import {
+  CanvasMp4Session,
+  createCanvasMp4Session,
+} from "@/src/lib/encodeMp4";
 import { ExportOrientation } from "@/src/types/types";
 
 export type CompileClip = {
@@ -37,14 +42,15 @@ function isAppleTouchDevice(): boolean {
 function pickMimeType(): string {
   if (typeof MediaRecorder === "undefined") return "";
 
-  // Safari / iOS: MP4 (H.264). Chrome: WebM. Prefer what the engine actually supports.
+  // Safari / iOS: MP4 (H.264). Chrome: try MP4 first, then WebM.
   const candidates = isAppleTouchDevice()
     ? ["video/mp4", "video/mp4;codecs=avc1.42E01E,mp4a.40.2", "video/webm"]
     : [
+        "video/mp4",
+        "video/mp4;codecs=avc1.4D401F",
         "video/webm;codecs=vp9,opus",
         "video/webm;codecs=vp8,opus",
         "video/webm",
-        "video/mp4",
       ];
 
   for (const type of candidates) {
@@ -101,6 +107,11 @@ function loadVideo(blob: Blob): Promise<HTMLVideoElement> {
       if (settled) return;
       settled = true;
       cleanupListeners();
+      try {
+        video.pause();
+      } catch {
+        // ignore
+      }
       resolve(video);
     };
 
@@ -119,7 +130,7 @@ function loadVideo(blob: Blob): Promise<HTMLVideoElement> {
 
     const timeout = window.setTimeout(
       () => fail("Timed out loading video for export"),
-      isAppleTouchDevice() ? 8_000 : 20_000
+      isAppleTouchDevice() ? 15_000 : 20_000
     );
 
     const maybeReady = () => {
@@ -138,17 +149,27 @@ function loadVideo(blob: Blob): Promise<HTMLVideoElement> {
     }
 
     // Nudge the decoder — required on some iOS versions for blob URLs.
+    // Do not pause after `succeed()`: that race froze every exported clip.
     void video
       .play()
       .then(() => {
-        video.pause();
+        if (settled) return;
+        try {
+          video.pause();
+        } catch {
+          // ignore
+        }
         maybeReady();
       })
       .catch(() => maybeReady());
   });
 }
 
-async function seekVideo(video: HTMLVideoElement, time: number): Promise<void> {
+async function seekVideo(
+  video: HTMLVideoElement,
+  time: number,
+  options?: { force?: boolean }
+): Promise<void> {
   if (!Number.isFinite(video.duration) || video.duration <= 0) return;
 
   const target = Math.min(
@@ -156,7 +177,7 @@ async function seekVideo(video: HTMLVideoElement, time: number): Promise<void> {
     Math.max(0, video.duration - 0.05)
   );
 
-  if (Math.abs(video.currentTime - target) < 0.04) return;
+  if (!options?.force && Math.abs(video.currentTime - target) < 0.02) return;
 
   await new Promise<void>((resolve) => {
     let settled = false;
@@ -170,14 +191,43 @@ async function seekVideo(video: HTMLVideoElement, time: number): Promise<void> {
     };
 
     // iOS often never fires seeked for blob URLs — never block the export.
-    const timeout = window.setTimeout(finish, 1500);
+    const timeout = window.setTimeout(
+      finish,
+      isAppleTouchDevice() ? 1500 : 400
+    );
     video.addEventListener("seeked", finish);
     video.addEventListener("error", finish);
+    try {
+      video.pause();
+    } catch {
+      // ignore
+    }
     try {
       video.currentTime = target;
     } catch {
       finish();
     }
+  });
+}
+
+function waitForVideoFrame(video: HTMLVideoElement): Promise<void> {
+  return new Promise((resolve) => {
+    const el = video as HTMLVideoElement & {
+      requestVideoFrameCallback?: (cb: () => void) => number;
+      cancelVideoFrameCallback?: (handle: number) => void;
+    };
+    if (typeof el.requestVideoFrameCallback === "function") {
+      const handle = el.requestVideoFrameCallback(() => {
+        window.clearTimeout(timeout);
+        resolve();
+      });
+      const timeout = window.setTimeout(() => {
+        el.cancelVideoFrameCallback?.(handle);
+        resolve();
+      }, 80);
+      return;
+    }
+    window.setTimeout(resolve, 16);
   });
 }
 
@@ -220,7 +270,7 @@ async function playWithTimeout(
 async function capturePlayingClip(
   ctx: CanvasRenderingContext2D,
   video: HTMLVideoElement,
-  end: number,
+  _end: number,
   stamp: string | null
 ): Promise<void> {
   await new Promise<void>((resolve) => {
@@ -245,12 +295,9 @@ async function capturePlayingClip(
     const tick = () => {
       drawFrame(ctx, video, stamp);
       const elapsed = performance.now() - startedAt;
-      if (
-        elapsed >= CLIP_DURATION * 1000 ||
-        video.ended ||
-        video.paused ||
-        video.currentTime >= end - 0.01
-      ) {
+      // Keep painting for the full second even if playback stalls — finishing
+      // early made MediaRecorder store a single still.
+      if (elapsed >= CLIP_DURATION * 1000 || video.ended) {
         finish();
         return;
       }
@@ -432,7 +479,7 @@ async function renderClipMobile(
     await seekVideo(video, start);
     drawFrame(ctx, video, stamp);
 
-    const playing = await playWithTimeout(video, 800);
+    const playing = await playWithTimeout(video, 1500);
     if (!playing) {
       resumeRecorder(recorder);
       await renderClipStillHold(ctx, video, stamp);
@@ -576,6 +623,218 @@ async function renderVideoClip(
   );
 }
 
+async function emitStillFrames(
+  draw: () => void,
+  session: CanvasMp4Session
+) {
+  for (let i = 0; i < OUTPUT_FPS; i++) {
+    draw();
+    await session.addFrame();
+  }
+}
+
+async function snapshotCanvas(
+  ctx: CanvasRenderingContext2D
+): Promise<ImageBitmap> {
+  return createImageBitmap(ctx.canvas);
+}
+
+async function captureClipSnapshots(
+  ctx: CanvasRenderingContext2D,
+  video: HTMLVideoElement,
+  start: number,
+  stamp: string | null
+): Promise<ImageBitmap[]> {
+  try {
+    video.pause();
+  } catch {
+    // ignore
+  }
+
+  await seekVideo(video, start, { force: true });
+  await waitForVideoFrame(video);
+  drawFrame(ctx, video, stamp);
+
+  const playing = await playWithTimeout(video, 2000);
+  if (!playing) {
+    return captureClipByStepping(ctx, video, start, stamp);
+  }
+
+  const snaps: ImageBitmap[] = [];
+  const mediaStart = video.currentTime;
+  const deadline = performance.now() + CLIP_DURATION * 1000 + 500;
+
+  while (snaps.length < OUTPUT_FPS && performance.now() < deadline) {
+    const desired = start + (snaps.length + 0.5) / OUTPUT_FPS;
+    if (
+      video.currentTime + 0.012 < desired &&
+      !video.paused &&
+      !video.ended
+    ) {
+      await wait(8);
+      continue;
+    }
+
+    if (video.paused && snaps.length < 4) {
+      await playWithTimeout(video, 300);
+    }
+
+    drawFrame(ctx, video, stamp);
+    snaps.push(await snapshotCanvas(ctx));
+  }
+
+  try {
+    video.pause();
+  } catch {
+    // ignore
+  }
+
+  if (video.currentTime - mediaStart < 0.2 && snaps.length > 0) {
+    for (const snap of snaps) snap.close();
+    return captureClipByStepping(ctx, video, start, stamp);
+  }
+
+  while (snaps.length < OUTPUT_FPS) {
+    drawFrame(ctx, video, stamp);
+    snaps.push(await snapshotCanvas(ctx));
+  }
+
+  return snaps;
+}
+
+async function captureClipByStepping(
+  ctx: CanvasRenderingContext2D,
+  video: HTMLVideoElement,
+  start: number,
+  stamp: string | null
+): Promise<ImageBitmap[]> {
+  const snaps: ImageBitmap[] = [];
+  try {
+    video.pause();
+  } catch {
+    // ignore
+  }
+
+  for (let i = 0; i < OUTPUT_FPS; i++) {
+    const t = start + (i + 0.5) / OUTPUT_FPS;
+    await seekVideo(video, t, { force: true });
+    await waitForVideoFrame(video);
+    drawFrame(ctx, video, stamp);
+    snaps.push(await snapshotCanvas(ctx));
+  }
+
+  return snaps;
+}
+
+async function emitSnapshots(
+  ctx: CanvasRenderingContext2D,
+  snaps: ImageBitmap[],
+  session: CanvasMp4Session
+) {
+  for (const snap of snaps) {
+    ctx.drawImage(snap, 0, 0, ctx.canvas.width, ctx.canvas.height);
+    await session.addFrame();
+    snap.close();
+  }
+}
+
+async function renderCanvasVideoClip(
+  ctx: CanvasRenderingContext2D,
+  video: HTMLVideoElement,
+  startSeconds: number,
+  stamp: string | null,
+  session: CanvasMp4Session
+) {
+  const maxStart = Math.max(0, (video.duration || CLIP_DURATION) - CLIP_DURATION);
+  const start = Math.min(Math.max(0, startSeconds), maxStart);
+
+  video.muted = true;
+  video.defaultMuted = true;
+  video.playbackRate = 1;
+
+  const snaps = await captureClipSnapshots(ctx, video, start, stamp);
+  await emitSnapshots(ctx, snaps, session);
+}
+
+async function compileWithCanvasMp4({
+  clips,
+  showDateStamp,
+  onProgress,
+  ctx,
+  session,
+}: {
+  clips: CompileClip[];
+  showDateStamp: boolean;
+  onProgress?: (ratio: number, label: string) => void;
+  ctx: CanvasRenderingContext2D;
+  session: CanvasMp4Session;
+}): Promise<{ blob: Blob; extension: string }> {
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+
+  for (let i = 0; i < clips.length; i++) {
+    const clip = clips[i];
+    onProgress?.(
+      (i + 0.1) / (clips.length + 1),
+      `Rendering ${i + 1} of ${clips.length}…`
+    );
+    const stamp = showDateStamp ? formatStamp(clip.dayKey) : null;
+
+    try {
+      if (clip.kind === "photo") {
+        const image = await loadImage(clip.blob);
+        await emitStillFrames(
+          () =>
+            drawMediaFrame(
+              ctx,
+              image,
+              image.naturalWidth,
+              image.naturalHeight,
+              stamp
+            ),
+          session
+        );
+      } else {
+        const video = await loadVideo(clip.blob);
+        try {
+          await renderCanvasVideoClip(
+            ctx,
+            video,
+            clip.startSeconds,
+            stamp,
+            session
+          );
+        } finally {
+          disposeVideo(video);
+        }
+      }
+    } catch {
+      onProgress?.((i + 0.5) / (clips.length + 1), `Skipping clip ${i + 1}…`);
+      await emitStillFrames(() => {
+        const { width, height } = ctx.canvas;
+        ctx.fillStyle = "#0a0a0a";
+        ctx.fillRect(0, 0, width, height);
+        if (stamp) {
+          const fontSize = Math.round(Math.min(width, height) * 0.045);
+          ctx.font = `650 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillStyle = "#fff";
+          ctx.fillText(stamp, width / 2, height * 0.86);
+        }
+      }, session);
+    }
+  }
+
+  onProgress?.(0.92, "Adding credit…");
+  await emitStillFrames(() => drawEndCard(ctx), session);
+
+  onProgress?.(0.96, "Finishing export…");
+  const blob = await session.finalize();
+  onProgress?.(1, "Done");
+  return { blob, extension: "mp4" };
+}
+
 export async function compileOneSecondVideo({
   clips,
   showDateStamp,
@@ -599,6 +858,29 @@ export async function compileOneSecondVideo({
   canvas.height = height;
   const ctx = canvas.getContext("2d", { alpha: false });
   if (!ctx) throw new Error("Canvas unsupported");
+
+  // Chrome/Android: encode real MP4 via WebCodecs so Save to Photos works.
+  // iOS already gets MP4 from MediaRecorder, which is more reliable there.
+  if (!isAppleTouchDevice()) {
+    onProgress?.(0.04, "Starting encoder…");
+    const session = await createCanvasMp4Session(
+      canvas,
+      10_000_000
+    ).catch(() => null);
+    if (session) {
+      try {
+        return await compileWithCanvasMp4({
+          clips,
+          showDateStamp,
+          onProgress,
+          ctx,
+          session,
+        });
+      } catch {
+        session.cancel();
+      }
+    }
+  }
 
   onProgress?.(0.04, "Starting recorder…");
 
@@ -744,16 +1026,31 @@ export async function compileOneSecondVideo({
     throw new Error("Export produced an empty video — try fewer clips");
   }
 
-  // Use whatever MediaRecorder produced. Re-encoding with ffmpeg.wasm is too
-  // unreliable (hangs on "Encoding MP4…" in Chrome and on phones).
   const typeHint = `${blob.type} ${recordedType} ${mimeType}`.toLowerCase();
   const looksMp4 = typeHint.includes("mp4") || typeHint.includes("avc1");
-  const extension = looksMp4 ? "mp4" : "webm";
-  const mime = looksMp4 ? "video/mp4" : "video/webm";
 
-  onProgress?.(1, "Done");
-  return {
-    blob: blob.type === mime ? blob : new Blob([blob], { type: mime }),
-    extension,
-  };
+  if (looksMp4) {
+    const mime = "video/mp4";
+    onProgress?.(1, "Done");
+    return {
+      blob: blob.type === mime ? blob : new Blob([blob], { type: mime }),
+      extension: "mp4",
+    };
+  }
+
+  onProgress?.(0.97, "Converting to MP4…");
+  try {
+    const mp4 = await convertBlobToMp4(blob, (ratio, label) => {
+      onProgress?.(0.97 + ratio * 0.03, label);
+    });
+    onProgress?.(1, "Done");
+    return { blob: mp4, extension: "mp4" };
+  } catch {
+    const mime = "video/webm";
+    onProgress?.(1, "Done");
+    return {
+      blob: blob.type === mime ? blob : new Blob([blob], { type: mime }),
+      extension: "webm",
+    };
+  }
 }

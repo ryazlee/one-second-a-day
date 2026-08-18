@@ -7,14 +7,69 @@
  * Then set GitHub Actions secret / .env:
  *   NEXT_PUBLIC_MEDIA_PROXY_URL=https://one-second-a-day-proxy.<your-subdomain>.workers.dev
  */
-async function handleRequest(request) {
-  const cors = {
-    "Access-Control-Allow-Origin": request.headers.get("Origin") || "*",
+
+function corsHeaders(request) {
+  const origin = request.headers.get("Origin") || "*";
+  return {
+    "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET, OPTIONS",
     "Access-Control-Allow-Headers": "Authorization, Content-Type",
+    "Access-Control-Expose-Headers": "Content-Type, Content-Length",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
+}
+
+function json(request, body, status) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      ...corsHeaders(request),
+      "Content-Type": "application/json",
+    },
+  });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function retryable(status) {
+  return status === 404 || status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+async function fetchUpstream(url, accessToken) {
+  let lastResponse = null;
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 90_000);
+
+    try {
+      const upstream = await fetch(url, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        redirect: "follow",
+        signal: controller.signal,
+      });
+
+      if (upstream.ok) return upstream;
+      lastResponse = upstream;
+
+      if (!retryable(upstream.status) || attempt === 3) return upstream;
+      await sleep(400 * 2 ** attempt);
+    } catch (error) {
+      if (attempt === 3) throw error;
+      await sleep(400 * 2 ** attempt);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  return lastResponse;
+}
+
+async function handleRequest(request) {
+  const cors = corsHeaders(request);
 
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: cors });
@@ -31,32 +86,40 @@ async function handleRequest(request) {
     ?.replace(/^Bearer\s+/i, "");
 
   if (!target || !accessToken) {
-    return Response.json(
-      { error: "Missing url or access token" },
-      { status: 400, headers: cors }
-    );
+    return json(request, { error: "Missing url or access token" }, 400);
   }
 
   let parsed;
   try {
     parsed = new URL(target);
   } catch {
-    return Response.json({ error: "Invalid url" }, { status: 400, headers: cors });
+    return json(request, { error: "Invalid url" }, 400);
   }
 
   if (!parsed.hostname.endsWith(".googleusercontent.com")) {
-    return Response.json({ error: "Host not allowed" }, { status: 400, headers: cors });
+    return json(request, { error: "Host not allowed" }, 400);
   }
 
-  const upstream = await fetch(parsed.toString(), {
-    headers: { Authorization: `Bearer ${accessToken}` },
-    redirect: "follow",
-  });
+  let upstream;
+  try {
+    upstream = await fetchUpstream(parsed.toString(), accessToken);
+  } catch {
+    return json(
+      request,
+      { error: "Timed out fetching media from Google Photos" },
+      504
+    );
+  }
+
+  if (!upstream) {
+    return json(request, { error: "Failed to fetch media" }, 502);
+  }
 
   if (!upstream.ok) {
-    return Response.json(
+    return json(
+      request,
       { error: "Failed to fetch media", status: upstream.status },
-      { status: upstream.status, headers: cors }
+      upstream.status
     );
   }
 
@@ -66,6 +129,8 @@ async function handleRequest(request) {
     upstream.headers.get("Content-Type") || "application/octet-stream"
   );
   headers.set("Cache-Control", "private, max-age=3600");
+  const length = upstream.headers.get("Content-Length");
+  if (length) headers.set("Content-Length", length);
 
   return new Response(upstream.body, { status: 200, headers });
 }

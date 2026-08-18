@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  registerAuthBridge,
+  setAuthState,
+} from "@/src/lib/authToken";
 import { requestGoogleAccessToken } from "@/src/lib/googleClient";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
@@ -28,6 +32,7 @@ function readStoredToken(): StoredToken | null {
 function writeStoredToken(token: StoredToken | null) {
   if (!token) localStorage.removeItem(STORAGE_KEY);
   else localStorage.setItem(STORAGE_KEY, JSON.stringify(token));
+  setAuthState(token?.access_token ?? null, token?.expires_at ?? 0);
   // Clear legacy session key from earlier builds.
   sessionStorage.removeItem("google_access_token");
   window.dispatchEvent(new Event(AUTH_EVENT));
@@ -50,6 +55,7 @@ function subscribe(onStoreChange: () => void) {
 function getSnapshot(): string | null {
   const stored = readStoredToken();
   if (!stored) return null;
+  setAuthState(stored.access_token, stored.expires_at);
   // Expose token even if near-expiry; restore effect refreshes it.
   return stored.access_token;
 }
@@ -80,6 +86,13 @@ export function useAccessToken() {
     },
     []
   );
+
+  useEffect(() => {
+    registerAuthBridge({
+      refresher: () => requestGoogleAccessToken(""),
+      persist: (nextToken, expiresIn) => setAccessToken(nextToken, expiresIn),
+    });
+  }, [setAccessToken]);
 
   // Persist across reloads: reuse fresh token or silently refresh.
   useEffect(() => {
@@ -114,6 +127,19 @@ export function useAccessToken() {
       cancelled = true;
     };
   }, [setAccessToken]);
+
+  // Refresh ~2 minutes before expiry so long trim/export sessions don't 401.
+  useEffect(() => {
+    const stored = readStoredToken();
+    if (!stored || !accessToken) return;
+    const delay = Math.max(5_000, stored.expires_at - Date.now() - 120_000);
+    const timer = window.setTimeout(() => {
+      void requestGoogleAccessToken("")
+        .then((next) => setAccessToken(next.accessToken, next.expiresIn))
+        .catch(() => undefined);
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [accessToken, setAccessToken]);
 
   return { accessToken, setAccessToken, authReady };
 }

@@ -106,46 +106,70 @@ export async function requestGoogleAccessToken(
   });
 }
 
-export async function createPickerSession(accessToken: string) {
-  const res = await fetch("https://photospicker.googleapis.com/v1/sessions", {
-    method: "POST",
+import { fetchWithRetry } from "@/src/lib/http";
+import { MediaItem } from "@/src/types/types";
+
+async function googleJson<T>(
+  url: string,
+  accessToken: string,
+  init: RequestInit = {}
+): Promise<T> {
+  const res = await fetchWithRetry(url, {
+    ...init,
     headers: {
       Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
+      ...(init.body ? { "Content-Type": "application/json" } : {}),
+      ...init.headers,
     },
-    body: JSON.stringify({}),
+    timeoutMs: 20_000,
+    retries: 3,
   });
   if (!res.ok) {
-    throw new Error(`Failed to create picker session (${res.status})`);
+    throw new Error(`Google Photos request failed (${res.status})`);
   }
-  return res.json() as Promise<{ id: string; pickerUri: string }>;
+  return res.json() as Promise<T>;
+}
+
+export async function createPickerSession(accessToken: string) {
+  return googleJson<{ id: string; pickerUri: string }>(
+    "https://photospicker.googleapis.com/v1/sessions",
+    accessToken,
+    { method: "POST", body: JSON.stringify({}) }
+  );
 }
 
 export async function getPickerSession(accessToken: string, sessionId: string) {
-  const res = await fetch(
+  return googleJson<{ mediaItemsSet?: boolean }>(
     `https://photospicker.googleapis.com/v1/sessions/${sessionId}`,
-    {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    }
+    accessToken
   );
-  if (!res.ok) {
-    throw new Error(`Failed to poll picker session (${res.status})`);
-  }
-  return res.json() as Promise<{ mediaItemsSet?: boolean }>;
 }
 
 export async function listPickerMediaItems(
   accessToken: string,
   sessionId: string
-) {
-  const res = await fetch(
-    `https://photospicker.googleapis.com/v1/mediaItems?sessionId=${encodeURIComponent(sessionId)}`,
-    {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    }
-  );
-  if (!res.ok) {
-    throw new Error(`Failed to list media items (${res.status})`);
-  }
-  return res.json();
+): Promise<{ mediaItems: MediaItem[] }> {
+  const mediaItems: MediaItem[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const params = new URLSearchParams({
+      sessionId,
+      pageSize: "100",
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const data = await googleJson<{
+      mediaItems?: MediaItem[];
+      nextPageToken?: string;
+    }>(
+      `https://photospicker.googleapis.com/v1/mediaItems?${params.toString()}`,
+      accessToken
+    );
+
+    mediaItems.push(...(data.mediaItems || []));
+    pageToken = data.nextPageToken;
+  } while (pageToken);
+
+  return { mediaItems };
 }

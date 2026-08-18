@@ -1,6 +1,9 @@
 "use client";
 
-import { fetchVideoBlob } from "@/src/lib/fetchVideoBlob";
+import {
+  fetchPreviewObjectUrl,
+  fetchVideoBlob,
+} from "@/src/lib/fetchVideoBlob";
 import { formatStamp } from "@/src/lib/dates";
 import { ExportOrientation, MediaItem } from "@/src/types/types";
 import { useEffect, useRef, useState } from "react";
@@ -22,15 +25,54 @@ export function VideoPlayer({
   orientation: ExportOrientation;
   onDuration?: (duration: number) => void;
 }) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   const itemRef = useRef(video);
   itemRef.current = video;
   const isPhoto = video.type === "PHOTO";
 
+  const [visible, setVisible] = useState(false);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
 
   useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) setVisible(true);
+      },
+      { rootMargin: "240px" }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    setPreviewUrl(null);
+
+    async function loadPreview() {
+      try {
+        const url = await fetchPreviewObjectUrl(itemRef.current, accessToken);
+        if (!cancelled) setPreviewUrl(url);
+      } catch {
+        // Full media fetch is the source of truth.
+      }
+    }
+
+    void loadPreview();
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, video.id, accessToken]);
+
+  useEffect(() => {
+    if (!visible) return;
     let cancelled = false;
     let createdUrl: string | null = null;
 
@@ -42,10 +84,14 @@ export function VideoPlayer({
         if (cancelled) return;
         createdUrl = URL.createObjectURL(blob);
         setBlobUrl(createdUrl);
-      } catch {
+      } catch (err) {
         if (!cancelled) {
           setError(
-            isPhoto ? "Couldn’t load this photo." : "Couldn’t load this video."
+            err instanceof Error
+              ? err.message
+              : isPhoto
+                ? "Couldn’t load this photo."
+                : "Couldn’t load this video."
           );
         }
       }
@@ -57,7 +103,7 @@ export function VideoPlayer({
       cancelled = true;
       if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
-  }, [video.id, accessToken, isPhoto]);
+  }, [visible, video.id, accessToken, isPhoto, retryTick]);
 
   useEffect(() => {
     if (isPhoto) {
@@ -84,34 +130,18 @@ export function VideoPlayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startSeconds, blobUrl, isPhoto]);
 
-  if (error) {
-    return (
-      <div className="video-frame">
-        <div className="video-error">{error}</div>
-      </div>
-    );
-  }
-
-  if (!blobUrl) {
-    return (
-      <div className="video-frame">
-        <div className="video-loading">
-          {isPhoto ? "Loading photo…" : "Loading video…"}
-        </div>
-      </div>
-    );
-  }
+  const frameClass = `video-frame ${
+    orientation === "landscape" ? "video-frame--landscape" : ""
+  }`;
 
   return (
-    <div
-      className={`video-frame ${
-        orientation === "landscape" ? "video-frame--landscape" : ""
-      }`}
-    >
-      {isPhoto ? (
+    <div ref={rootRef} className={frameClass}>
+      {isPhoto && (blobUrl || previewUrl) ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={blobUrl} alt="" className="video-frame__photo" />
-      ) : (
+        <img src={blobUrl || previewUrl || ""} alt="" className="video-frame__photo" />
+      ) : null}
+
+      {!isPhoto && blobUrl ? (
         <video
           ref={videoElRef}
           src={blobUrl}
@@ -125,7 +155,32 @@ export function VideoPlayer({
             }
           }}
         />
-      )}
+      ) : null}
+
+      {!isPhoto && !blobUrl && previewUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={previewUrl} alt="" className="video-frame__photo" />
+      ) : null}
+
+      {!blobUrl && !error && visible ? (
+        <div className={previewUrl ? "video-loading video-loading--overlay" : "video-loading"}>
+          {isPhoto ? "Loading photo…" : "Loading video…"}
+        </div>
+      ) : null}
+
+      {error && !blobUrl && visible ? (
+        <div className="video-error">
+          <p>{error}</p>
+          <button
+            type="button"
+            className="video-error__retry"
+            onClick={() => setRetryTick((n) => n + 1)}
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
+
       {showDateStamp ? (
         <div className="video-frame__stamp">{formatStamp(dayKey)}</div>
       ) : null}

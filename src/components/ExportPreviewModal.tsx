@@ -6,6 +6,7 @@ import { useEffect, useId, useRef } from "react";
 
 export type ExportPreview = {
   blob: Blob;
+  file: File;
   filename: string;
   url: string;
 };
@@ -28,6 +29,7 @@ export function ExportPreviewModal({
   const titleId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
   const showShare = prefersShareSheet();
+  const isMp4 = exportFile.filename.toLowerCase().endsWith(".mp4");
 
   useEffect(() => {
     const previous = document.body.style.overflow;
@@ -106,10 +108,15 @@ export function ExportPreviewModal({
 
         {showShare ? (
           <p className="export-modal__hint muted">
-            Save to Photos opens the share sheet — choose{" "}
-            <strong>Save Video</strong> for Camera Roll.
+            {isMp4
+              ? "Save to Photos opens the share sheet — choose Save Video for Camera Roll."
+              : "If Save Video isn’t listed, use Download, then share the file from Files."}
           </p>
-        ) : null}
+        ) : (
+          <p className="export-modal__hint muted">
+            Saved as {exportFile.filename}
+          </p>
+        )}
       </div>
     </div>
   );
