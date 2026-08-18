@@ -6,6 +6,9 @@ const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 export const metadata = {
   title: "1 Second a Day",
   description: "Make a watermark-free one-second-a-day video from Google Photos",
+  verification: {
+    google: "tWnMVazQifLr9I-uIWsSSt0P2W7hJ8ngXofE1Ab6mNY",
+  },
   icons: {
     icon: [
       { url: `${basePath}/favicon.ico`, sizes: "any" },
