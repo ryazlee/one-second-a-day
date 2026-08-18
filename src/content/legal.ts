@@ -5,7 +5,7 @@ export type LegalSection = {
 
 export const privacyMeta = {
   title: "Privacy Policy",
-  updated: "August 1, 2026",
+  updated: "August 18, 2026",
 };
 
 export const privacySections: LegalSection[] = [
@@ -36,14 +36,16 @@ export const privacySections: LegalSection[] = [
     heading: "Where processing happens",
     body: [
       "Video download, trimming, date stamps, and MP4 encoding run locally in your browser.",
-      "Your selected media is not uploaded to our servers for storage. Temporary in-browser caches may exist only on your device for the current session.",
+      "Your selected media is not uploaded to our servers for storage. Temporary in-browser caches may exist only on your device while you use the editor.",
       "Sign-in and Photos Picker requests go to Google’s services under Google’s terms and privacy policy.",
+      "A media proxy may briefly stream files you selected so your browser can play and export them. That proxy does not retain Google user data after the request finishes.",
     ],
   },
   {
     heading: "Cookies and local storage",
     body: [
-      "We may store your Google access token in session storage so you stay signed in while the tab is open. Clearing site data or signing out removes it.",
+      "We store your Google OAuth access token in your browser’s local storage so you can stay signed in across page reloads. Signing out or clearing this site’s data deletes it.",
+      "We may keep a short-lived Google Photos Picker session identifier in session storage while a picker tab is open. Closing the tab or signing out removes it.",
       "We do not use third-party advertising cookies on this site.",
     ],
   },
@@ -56,11 +58,14 @@ export const privacySections: LegalSection[] = [
     ],
   },
   {
-    heading: "Data retention and your choices",
+    heading: "Retention and deletion of Google user data",
     body: [
-      "You can sign out at any time to clear the stored access token from this site.",
-      "You can revoke this app’s access in your Google Account permissions settings.",
-      "Exported videos you download are saved to your device; we do not keep a copy.",
+      "This section describes the retention and deletion of Google user data accessed through Google APIs, including OAuth tokens, Google Photos Picker session identifiers, and the media and metadata you select.",
+      "We do not retain Google user data on our servers. We do not create a user account database, and we do not store, archive, or back up your Google Photos library or selected clips on any server we control.",
+      "Retention on your device: the Google OAuth access token is retained in local storage until it expires, you sign out, or you clear this site’s data. Selected Google Photos media and related metadata are held in browser memory (and temporary browser caches) only while you use the editor.",
+      "Deletion: signing out immediately deletes the stored access token and in-memory Google user data from this app. You can also delete remaining local copies by clearing this site’s data in your browser settings for ryazlee.github.io.",
+      "You can revoke this app’s access to your Google account at any time at https://myaccount.google.com/permissions. Revoking access invalidates tokens so we can no longer access your Google user data.",
+      "Because we do not keep a server-side copy of Google user data, there is nothing for us to delete from our servers after you sign out. Exported videos you download are saved only on your device; we do not keep a copy. To request confirmation of deletion, email ryan.j.lee99@gmail.com.",
     ],
   },
   {
@@ -78,7 +83,7 @@ export const privacySections: LegalSection[] = [
   {
     heading: "Contact",
     body: [
-      "Questions about privacy: open an issue on the project repository or email the site operator via the contact method listed on ryazlee.github.io.",
+      "Questions about privacy, retention, or deletion of Google user data: email ryan.j.lee99@gmail.com, or open an issue on the project repository.",
     ],
   },
 ];
