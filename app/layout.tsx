@@ -31,7 +31,7 @@ try {
     document.documentElement.classList.add('theme-dark');
     document
       .querySelector('meta[name="theme-color"]')
-      ?.setAttribute('content', '#111827');
+      ?.setAttribute('content', '#09090b');
   }
 } catch (e) {}
 `;
@@ -46,6 +46,16 @@ export default function RootLayout({
       <head>
         <meta name="theme-color" content="#fafafa" />
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: "window.goatcounter = { no_onload: true }",
+          }}
+        />
+        <script
+          data-goatcounter="https://ryab.goatcounter.com/count"
+          async
+          src="https://gc.zgo.at/count.js"
+        />
       </head>
       <body>
         <Providers>{children}</Providers>
