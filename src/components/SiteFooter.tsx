@@ -1,5 +1,4 @@
 import Link from "next/link";
-import MakerCredit from "./MakerCredit";
 
 export function SiteFooter() {
   return (
@@ -13,7 +12,6 @@ export function SiteFooter() {
           One Second A Day is a free browser tool for personal one-second-a-day
           compilations. Processing stays on your device.
         </p>
-        <MakerCredit />
       </div>
     </footer>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/src/components/Button";
+import MakerCredit from "@/src/components/MakerCredit";
 import { APP_NAME, APP_TAGLINE } from "@/src/content/app";
 import Link from "next/link";
 
@@ -17,6 +18,7 @@ export function Landing({
     <section className="landing">
       <h1 className="landing__brand">{APP_NAME}</h1>
       <p className="landing__headline">{APP_TAGLINE}</p>
+      <MakerCredit />
       <p className="landing__lead">
         {APP_NAME} is a free web application that helps you create a
         one-second-a-day video from your own Google Photos library. You pick
